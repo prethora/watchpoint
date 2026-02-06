@@ -2319,11 +2319,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Unit tests (or integration tests against LocalStack) verify parameters are written correctly with encryption.",
-        "status": "in_progress",
+        "status": "complete",
         "reports": [],
         "started_at": "2026-02-06T20:34:36.427767+00:00",
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "completed_at": "2026-02-06T20:38:16.410435+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
@@ -2337,9 +2337,9 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Validators correctly identify valid/invalid credentials in test cases.",
-        "status": "unprocessed",
+        "status": "in_progress",
         "reports": [],
-        "started_at": null,
+        "started_at": "2026-02-06T20:38:16.410498+00:00",
         "completed_at": null,
         "satisfaction_iterations": null,
         "skip_reason": null
