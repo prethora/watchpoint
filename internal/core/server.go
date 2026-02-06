@@ -41,6 +41,7 @@ type Server struct {
 	Authenticator    Authenticator    // Resolves tokens to Actors; injected for testability.
 	RateLimitStore   RateLimitStore   // Backing store for rate limiting; injected for testability.
 	IdempotencyStore IdempotencyStore // Backing store for idempotency keys; injected for testability.
+	HealthProbes     []HealthProbe    // Subsystem health probes (DB, S3, SQS); injected at startup.
 
 	// Internal router
 	router *chi.Mux
