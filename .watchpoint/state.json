@@ -1862,11 +1862,13 @@
           "NOTIF-003"
         ],
         "definition_of_done": "Unit tests verify diffing logic (detecting 'New Threat' vs 'Cleared').",
-        "status": "unprocessed",
-        "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "status": "complete",
+        "reports": [
+          ".watchpoint/reports/architectural/phase-08_implement-digest-generator_2026-02-06T154800.md"
+        ],
+        "started_at": "2026-02-06T15:46:16.414301+00:00",
+        "completed_at": "2026-02-06T15:53:40.705073+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
