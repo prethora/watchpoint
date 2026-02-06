@@ -1,3 +1,7 @@
+# After Compacting
+
+Read the "master-prompt.md" file, this is where the process all begin, so you MUST read it again and continue executing it, it is MORE important than the summary.
+
 # WatchPoint Platform
 
 A serverless weather monitoring and alerting platform built with Go (API/workers) and Python (scientific compute), deployed on AWS via SAM.
