@@ -993,11 +993,11 @@
           "BILL-007"
         ],
         "definition_of_done": "Unit tests verify event routing and signature failure responses.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:31:44.294137+00:00",
+        "completed_at": "2026-02-06T03:39:40.901803+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
