@@ -1802,11 +1802,11 @@
           "API-002"
         ],
         "definition_of_done": "Unit tests confirm `SafeTransport` rejects localhost, private IPs, and redirects to private IPs.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T15:28:12.734000+00:00",
+        "completed_at": "2026-02-06T15:33:43.370116+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
