@@ -22,6 +22,7 @@ const (
 	DimEndpoint     = "Endpoint"
 	DimProvider     = "Provider"
 	DimEventType    = "EventType"
+	DimResult       = "Result"
 
 	// Metric Namespace
 	MetricNamespace = "WatchPoint"
