@@ -2200,11 +2200,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`.dockerignore` exists. Running `docker build . -f /dev/null` is instantaneous.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T19:22:12.660470Z",
+        "completed_at": "2026-02-06T19:25:44.718692+00:00Z",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
