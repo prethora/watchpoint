@@ -1614,11 +1614,11 @@
           "FCST-003"
         ],
         "definition_of_done": "Compiles. Can be invoked via `main.go`.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T12:32:02.496259+00:00",
+        "completed_at": "2026-02-06T12:36:36.837568+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
