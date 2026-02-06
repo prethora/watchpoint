@@ -72,17 +72,16 @@ func (s *Server) registerGlobalMiddleware() {
 	s.router.Use(s.IdempotencyMiddleware)
 }
 
-// mountV1 registers all v1 endpoints. Domain handlers are initialized here
-// to ensure they receive only the config/repos they explicitly need.
+// mountV1 registers all v1 endpoints. Domain handler routes are registered via
+// V1RouteRegistrars, which are populated by the application entry point (main.go).
+// This indirection avoids import cycles between core and handler packages.
 //
-// TODO: Mount domain handlers (watchpoints, auth, forecasts, organizations,
+// TODO: Mount remaining domain handlers (watchpoints, forecasts, organizations,
 // billing) when their handler packages are implemented in Phase 6+.
 func (s *Server) mountV1(r chi.Router) {
-	// Placeholder: domain handlers will be mounted here.
-	// Example (to be implemented):
-	//   wpHandler := handlers.NewWatchPointHandler(...)
-	//   r.Mount("/watchpoints", wpHandler.Routes())
-	_ = r // silence unused parameter warning
+	for _, registrar := range s.V1RouteRegistrars {
+		registrar(r)
+	}
 }
 
 // requestTimeout returns the configured request timeout, falling back to the

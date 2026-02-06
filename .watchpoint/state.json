@@ -913,11 +913,11 @@
           "DASH-004"
         ],
         "definition_of_done": "Unit tests confirm Cookie headers are set correctly. `curl` to local API `/auth/login` returns 200/401 as expected.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:02:02.672285+00:00",
+        "completed_at": "2026-02-06T03:13:16.862309+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {

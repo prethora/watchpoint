@@ -12,8 +12,19 @@ import (
 // authPublicPaths lists URL paths that are exempt from authentication.
 // Requests to these paths bypass the AuthMiddleware entirely.
 var authPublicPaths = map[string]bool{
-	"/health":      true,
-	"/openapi.json": true,
+	"/health":                    true,
+	"/openapi.json":              true,
+	"/v1/auth/login":             true,
+	"/v1/auth/forgot-password":   true,
+	"/v1/auth/reset-password":    true,
+	"/v1/auth/accept-invite":     true,
+}
+
+// authPublicPrefixes lists URL path prefixes that are exempt from authentication.
+// Requests whose path starts with any of these prefixes bypass AuthMiddleware.
+// Used for routes with dynamic segments (e.g., OAuth provider routes).
+var authPublicPrefixes = []string{
+	"/v1/auth/oauth/",
 }
 
 // AuthMiddleware wraps handlers requiring authentication.
@@ -42,10 +53,18 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Skip authentication for public paths.
+		// Skip authentication for public paths (exact match).
 		if authPublicPaths[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
+		}
+
+		// Skip authentication for public path prefixes (dynamic routes).
+		for _, prefix := range authPublicPrefixes {
+			if strings.HasPrefix(r.URL.Path, prefix) {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
 		// Extract the Authorization header.

@@ -43,6 +43,12 @@ type Server struct {
 	IdempotencyStore IdempotencyStore // Backing store for idempotency keys; injected for testability.
 	HealthProbes     []HealthProbe    // Subsystem health probes (DB, S3, SQS); injected at startup.
 
+	// V1RouteRegistrars holds functions that register domain handler routes
+	// under the /v1 API version group. Each function receives the v1 chi.Router
+	// and mounts its domain-specific routes. This pattern avoids import cycles
+	// between core (middleware/response utilities) and handler packages.
+	V1RouteRegistrars []func(chi.Router)
+
 	// Internal router
 	router *chi.Mux
 }

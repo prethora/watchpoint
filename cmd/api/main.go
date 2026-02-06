@@ -23,6 +23,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"watchpoint/internal/api/handlers"
 	"watchpoint/internal/config"
 	"watchpoint/internal/core"
 	"watchpoint/internal/types"
@@ -75,6 +78,23 @@ func run() error {
 	srv.RateLimitStore = rateLimitStore
 	srv.IdempotencyStore = idempotencyStore
 	srv.Metrics = metrics
+
+	// Wire the Auth handler with stub services.
+	// When real auth/session services are available (from Phase 5 Task 1-2),
+	// they will replace the stub auth/session services here.
+	stubAuthSvc := &stubAuthHandlerService{}
+	stubSessSvc := &stubSessionHandlerService{}
+	authHandler := handlers.NewAuthHandler(
+		stubAuthSvc,
+		stubSessSvc,
+		nil, // OAuthManager - not wired yet
+		handlers.DefaultCookieConfig(),
+		logger,
+		srv.Validator,
+	)
+	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, func(r chi.Router) {
+		r.Route("/auth", authHandler.RegisterRoutes)
+	})
 
 	// Mount all routes (middleware chain + versioned endpoints + health).
 	srv.MountRoutes()
@@ -253,12 +273,43 @@ type stubMetricsCollector struct{}
 
 func (s *stubMetricsCollector) RecordRequest(_, _, _ string, _ time.Duration) {}
 
+// stubAuthHandlerService implements handlers.AuthService with error responses.
+// This stub returns ErrCodeInternalUnexpected for all operations, indicating that
+// real auth service implementations need to be wired. It allows the server to start
+// and serve requests while returning meaningful errors.
+type stubAuthHandlerService struct{}
+
+func (s *stubAuthHandlerService) Login(_ context.Context, _, _, _ string) (*types.User, *types.Session, error) {
+	return nil, nil, types.NewAppError(types.ErrCodeAuthInvalidCreds, "auth service not configured", nil)
+}
+
+func (s *stubAuthHandlerService) AcceptInvite(_ context.Context, _, _, _, _ string) (*types.User, *types.Session, error) {
+	return nil, nil, types.NewAppError(types.ErrCodeInternalUnexpected, "auth service not configured", nil)
+}
+
+func (s *stubAuthHandlerService) RequestPasswordReset(_ context.Context, _ string) error {
+	return nil // Swallowed by handler per enumeration protection
+}
+
+func (s *stubAuthHandlerService) CompletePasswordReset(_ context.Context, _, _ string) error {
+	return types.NewAppError(types.ErrCodeInternalUnexpected, "auth service not configured", nil)
+}
+
+// stubSessionHandlerService implements handlers.SessionService with no-op behavior.
+type stubSessionHandlerService struct{}
+
+func (s *stubSessionHandlerService) InvalidateSession(_ context.Context, _ string) error {
+	return nil
+}
+
 // Compile-time interface assertions to ensure stubs satisfy their contracts.
 var (
-	_ types.RepositoryRegistry = (*stubRepositoryRegistry)(nil)
-	_ types.SecurityService    = (*stubSecurityService)(nil)
-	_ core.Authenticator       = (*stubAuthenticator)(nil)
-	_ core.RateLimitStore      = (*stubRateLimitStore)(nil)
-	_ core.IdempotencyStore    = (*stubIdempotencyStore)(nil)
-	_ core.MetricsCollector    = (*stubMetricsCollector)(nil)
+	_ types.RepositoryRegistry  = (*stubRepositoryRegistry)(nil)
+	_ types.SecurityService     = (*stubSecurityService)(nil)
+	_ core.Authenticator        = (*stubAuthenticator)(nil)
+	_ core.RateLimitStore       = (*stubRateLimitStore)(nil)
+	_ core.IdempotencyStore     = (*stubIdempotencyStore)(nil)
+	_ core.MetricsCollector     = (*stubMetricsCollector)(nil)
+	_ handlers.AuthService      = (*stubAuthHandlerService)(nil)
+	_ handlers.SessionService   = (*stubSessionHandlerService)(nil)
 )
