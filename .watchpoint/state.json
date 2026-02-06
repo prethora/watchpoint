@@ -588,11 +588,11 @@
           "NOTIF-006"
         ],
         "definition_of_done": "Unit tests pass with sample valid/invalid payloads and signatures.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T01:13:18.496719+00:00",
+        "completed_at": "2026-02-06T01:16:53.195803+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
