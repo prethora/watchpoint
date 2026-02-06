@@ -2220,11 +2220,11 @@
           "EVAL-001"
         ],
         "definition_of_done": "`docker build --platform linux/arm64 -f worker/eval/Dockerfile .` completes successfully. Pydantic model verification tests run during build.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T19:25:58.821467+00:00Z",
+        "completed_at": "2026-02-06T19:36:33.208435+00:00Z",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
