@@ -1947,11 +1947,11 @@
           "HOOK-001"
         ],
         "definition_of_done": "Unit tests verify correct JSON output for Slack/Teams and correct HMAC signature generation.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T16:15:34.794291+00:00",
+        "completed_at": "2026-02-06T16:25:09.703429+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

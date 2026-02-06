@@ -157,5 +157,29 @@ func CalculateNextRetry(policy RetryPolicy, attempt int) time.Duration {
 	return d
 }
 
+// SignatureManager handles HMAC payload signing with dual-validity support
+// for zero-downtime secret rotation.
+//
+// Architecture reference: 08a-notification-core.md Section 8
+type SignatureManager interface {
+	// SignPayload generates "t=...,v1=...,v1_old=..." signature header.
+	//
+	// Implementation Requirements:
+	// 1. Generate t=<unix_timestamp> using the provided now parameter.
+	// 2. Generate v1=<hmac_sha256> using secretConfig["secret"] as the signing key.
+	// 3. Previous Secret Handling (Dual-Validity):
+	//    a. Parse previous_secret from secretConfig. If not present, skip v1_old.
+	//    b. Parse previous_secret_expires_at from secretConfig as RFC3339 timestamp.
+	//    c. CRITICAL: If now > previous_secret_expires_at, omit v1_old even if
+	//       previous_secret exists in the config.
+	//    d. If previous_secret exists AND now <= previous_secret_expires_at, generate
+	//       v1_old=<hmac_sha256> using previous_secret as the signing key.
+	// 4. Return formatted header: "t=...,v1=..." or "t=...,v1=...,v1_old=..."
+	SignPayload(payload []byte, secretConfig map[string]any, now time.Time) (string, error)
+
+	// VerifySignature checks payload against signature header.
+	VerifySignature(payload []byte, header string, secrets map[string]string) bool
+}
+
 // ErrDigestEmpty is returned when SendEmpty=false and the digest has no content.
 var ErrDigestEmpty = errors.New("digest empty and SendEmpty=false")
