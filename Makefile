@@ -1,4 +1,4 @@
-.PHONY: test build clean migrate-up migrate-down
+.PHONY: test build clean migrate-up migrate-down mocks
 
 # Database connection string used by the migrate container (connects via Docker network)
 MIGRATE_DB_URL := postgres://postgres:localdev@postgres:5432/watchpoint?sslmode=disable
@@ -30,3 +30,15 @@ migrate-up:
 # Roll back all database migrations
 migrate-down:
 	$(MIGRATE_CMD) down -all
+
+# Generate mocks for all interfaces in internal/external using mockery.
+# Uses --name with a regex to target only true interfaces (excludes function types
+# like RegistryOption and BaseClientOption which cannot be properly mocked).
+mocks:
+	@rm -rf internal/external/mocks
+	go run github.com/vektra/mockery/v2@latest \
+		--name 'BillingService|WebhookVerifier|EmailProvider|EmailVerifier|OAuthProvider|OAuthManager|OrgBillingLookup' \
+		--case snake \
+		--outpkg mocks \
+		--output internal/external/mocks \
+		--dir internal/external
