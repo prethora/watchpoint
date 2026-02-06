@@ -1676,11 +1676,11 @@
           "NOTIF-002"
         ],
         "definition_of_done": "Integration tests confirm database rows are deleted/updated and TierTransition calls Mock S3 delete.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T14:32:20.085846+00:00",
+        "completed_at": "2026-02-06T14:40:21.799656+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
