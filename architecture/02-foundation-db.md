@@ -143,16 +143,14 @@ CREATE TABLE watchpoints (
     -- Spatial Sharding (Deterministic Tile ID)
     -- Generates "lat_index.lon_index" for 22.5x45 degree tiles
     tile_id TEXT GENERATED ALWAYS AS (
-        CONCAT(
-            FLOOR((90.0 - location_lat) / 22.5)::INT,
-            '.',
-            FLOOR(
-                CASE 
-                    WHEN location_lon >= 0 THEN location_lon 
-                    ELSE 360.0 + location_lon 
-                END / 45.0
-            )::INT
-        )
+        FLOOR((90.0 - location_lat) / 22.5)::INT::TEXT
+        || '.'
+        || FLOOR(
+            CASE
+                WHEN location_lon >= 0 THEN location_lon
+                ELSE 360.0 + location_lon
+            END / 45.0
+        )::INT::TEXT
     ) STORED,
 
     -- Mode Configuration (Mutually Exclusive)
