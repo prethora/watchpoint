@@ -548,11 +548,11 @@
           "NOTIF-001"
         ],
         "definition_of_done": "`sendgrid_test.go` passes using `httptest` to verify payload structure sent to provider.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T01:02:50.602861+00:00",
+        "completed_at": "2026-02-06T01:08:01.527519+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
