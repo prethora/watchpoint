@@ -528,11 +528,11 @@
           "INFO-005"
         ],
         "definition_of_done": "`stripe_test.go` passes using `httptest` to mock Stripe API responses (verifying JSON parsing and error mapping).",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T00:52:03.546317+00:00",
+        "completed_at": "2026-02-06T01:02:37.387019+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
