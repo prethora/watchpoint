@@ -2357,11 +2357,11 @@
           "SEC-001"
         ],
         "definition_of_done": "Generator produces consistent high-entropy strings.",
-        "status": "in_progress",
+        "status": "complete",
         "reports": [],
         "started_at": "2026-02-06T20:43:19.208382+00:00",
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "completed_at": "2026-02-06T20:45:47.746307+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
@@ -2374,9 +2374,9 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "The tool successfully walks through the full checklist, validates inputs, and populates SSM. It handles the `[Skip]` option for existing keys.",
-        "status": "unprocessed",
+        "status": "in_progress",
         "reports": [],
-        "started_at": null,
+        "started_at": "2026-02-06T20:45:47.746378+00:00",
         "completed_at": null,
         "satisfaction_iterations": null,
         "skip_reason": null

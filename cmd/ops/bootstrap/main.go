@@ -10,15 +10,14 @@
 //	go run ./cmd/ops/bootstrap --env=dev
 //	go run ./cmd/ops/bootstrap --env=prod --profile=watchpoint-prod --region=us-east-1
 //
-// The tool performs the following on startup:
+// The tool performs the following:
 //  1. Parses --env, --profile, and --region flags.
 //  2. Initializes the AWS SDK v2 session with the specified profile/region.
 //  3. Calls STS GetCallerIdentity to verify the active AWS identity.
 //  4. If --env=prod, requires explicit interactive confirmation ("yes").
 //  5. Prints a summary banner with account ID, environment, and region.
-//
-// Subsequent tasks will add SSM management, input validation, key generation,
-// and the main orchestration loop.
+//  6. Walks through the bootstrap protocol: collecting external secrets,
+//     generating internal keys, and writing all parameters to SSM.
 //
 // Architecture reference: architecture/13-human-setup.md (Sections 1, 2)
 // Operations reference: architecture/12-operations.md (Section 3.1)
@@ -130,8 +129,14 @@ func main() {
 	// Print the session banner.
 	printBanner(bctx)
 
-	// Placeholder: subsequent tasks will add the main bootstrap loop here.
-	logger.Info("bootstrap session initialized successfully",
+	// Run the main bootstrap loop.
+	runner := NewBootstrapRunner(bctx)
+	if err := runner.Run(ctx); err != nil {
+		logger.Error("bootstrap failed", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("bootstrap completed successfully",
 		"env", bctx.Environment,
 		"account", bctx.AccountID,
 		"region", bctx.AWSRegion,
