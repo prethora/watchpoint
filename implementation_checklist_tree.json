@@ -1780,7 +1780,7 @@
       {
         "task": "Execute Cloud Provisioning Sequence",
         "actor": "HUMAN",
-        "description": "Run the full provisioning pipeline for the `dev` environment:\n1. Ensure AWS credentials are active (`aws sts get-caller-identity`).\n2. Run `make deploy-cloud ENV=dev`.\n3. Run `make migrate-cloud ENV=dev`.\n4. Run `scripts/provision-runpod-iam.sh`.\n5. Verify `curl $(cat .env.cloud | grep API_ENDPOINT)/health` returns 200 OK.",
+        "description": "Run the full provisioning pipeline for the `dev` environment: 1. Ensure AWS credentials are active (`aws sts get-caller-identity`). 2. Run `make deploy-cloud ENV=dev` (creates buckets). 3. **CRITICAL**: Run `scripts/upload-weights.sh --bucket $(grep FORECAST_BUCKET .env.cloud | cut -d= -f2) --mock` (or upload real weights). 4. Run `make migrate-cloud ENV=dev`. 5. Run `scripts/provision-runpod-iam.sh`. 6. Verify `curl $(cat .env.cloud | grep API_ENDPOINT)/health` returns 200 OK.",
         "priority": "Critical",
         "relevant_files": [
           "12-operations.md"
