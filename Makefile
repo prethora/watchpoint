@@ -1,4 +1,4 @@
-.PHONY: test build clean migrate-up migrate-down mocks lint-python
+.PHONY: test build clean migrate-up migrate-down mocks lint-python run-job
 
 # Database connection string used by the migrate container (connects via Docker network)
 MIGRATE_DB_URL := postgres://postgres:localdev@postgres:5432/watchpoint?sslmode=disable
@@ -47,3 +47,17 @@ mocks:
 lint-python:
 	black --check worker/ runpod/
 	mypy worker/ runpod/ --ignore-missing-imports
+
+# Run a maintenance job locally, bypassing Lambda.
+# Usage: make run-job TASK=aggregate_usage
+#        make run-job TASK=cleanup_soft_deletes REF_TIME=2026-01-15T02:00:00Z
+#        make run-job TASK=trigger_digests DRY_RUN=true
+# Available tasks: make run-job LIST=true
+run-job:
+ifdef LIST
+	go run ./cmd/tools/job-runner --list
+else ifdef DRY_RUN
+	go run ./cmd/tools/job-runner --task=$(TASK) --dry-run $(if $(REF_TIME),--reference-time=$(REF_TIME))
+else
+	go run ./cmd/tools/job-runner --task=$(TASK) $(if $(REF_TIME),--reference-time=$(REF_TIME))
+endif
