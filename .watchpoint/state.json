@@ -1036,11 +1036,11 @@
           "USER-012"
         ],
         "definition_of_done": "Tests confirm plaintext secret is never stored. Rotation sets correct expiry.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:49:19.382327+00:00",
+        "completed_at": "2026-02-06T04:00:42.486869+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

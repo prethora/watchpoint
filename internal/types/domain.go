@@ -135,14 +135,21 @@ type User struct {
 }
 
 // APIKey represents an API key for programmatic access.
+// Maps to the api_keys table in 02-foundation-db.md Section 5.1.
 type APIKey struct {
-	ID        string     `json:"id" db:"id"`
-	KeyPrefix string     `json:"key_prefix" db:"key_prefix"`
-	Name      string     `json:"name" db:"name"`
-	Scopes    []string   `json:"scopes" db:"scopes"`
-	Source    string     `json:"source,omitempty" db:"source"`
-	ExpiresAt *time.Time `json:"expires_at" db:"expires_at"`
-	RevokedAt *time.Time `json:"-" db:"revoked_at"`
+	ID               string     `json:"id" db:"id"`
+	OrganizationID   string     `json:"organization_id" db:"organization_id"`
+	CreatedByUserID  *string    `json:"created_by_user_id,omitempty" db:"created_by_user_id"`
+	KeyHash          string     `json:"-" db:"key_hash"`
+	KeyPrefix        string     `json:"key_prefix" db:"key_prefix"`
+	Scopes           []string   `json:"scopes" db:"scopes"`
+	TestMode         bool       `json:"test_mode" db:"test_mode"`
+	Source           string     `json:"source,omitempty" db:"source"`
+	Name             string     `json:"name" db:"name"`
+	LastUsedAt       *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	RevokedAt        *time.Time `json:"-" db:"revoked_at"`
+	CreatedAt        time.Time  `json:"created_at" db:"created_at"`
 }
 
 // Session represents an authenticated user session.
