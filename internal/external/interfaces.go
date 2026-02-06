@@ -98,3 +98,19 @@ type OAuthManager interface {
 	// Returns an error if no provider is registered with that name.
 	GetProvider(name string) (OAuthProvider, error)
 }
+
+// ---------------------------------------------------------------------------
+// RunPod Integration (Inference) — Section 5.1 of 09-scheduled-jobs.md
+// ---------------------------------------------------------------------------
+
+// RunPodClient abstracts interactions with the RunPod Serverless inference API.
+// Implementations translate between domain types and RunPod's REST endpoints.
+type RunPodClient interface {
+	// TriggerInference calls the RunPod API to start an inference job.
+	// Returns the external Job ID (e.g., RunPod ID) on success.
+	TriggerInference(ctx context.Context, payload types.InferencePayload) (string, error)
+
+	// CancelJob terminates a running job on the external provider.
+	// Used by reconciliation to stop hanging jobs and prevent cost accumulation.
+	CancelJob(ctx context.Context, externalID string) error
+}

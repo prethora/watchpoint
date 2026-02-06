@@ -193,6 +193,33 @@ func (s *StubEmailVerifier) Verify(payload []byte, signature string, timestamp s
 	return true, nil
 }
 
+// StubRunPodClient implements RunPodClient by logging calls and returning
+// predictable job IDs. Used when config.IsTestMode is true or APP_ENV=local.
+type StubRunPodClient struct {
+	logger *slog.Logger
+}
+
+// NewStubRunPodClient creates a new StubRunPodClient.
+func NewStubRunPodClient(logger *slog.Logger) *StubRunPodClient {
+	return &StubRunPodClient{logger: logger}
+}
+
+func (s *StubRunPodClient) TriggerInference(ctx context.Context, payload types.InferencePayload) (string, error) {
+	s.logger.InfoContext(ctx, "stub: TriggerInference called",
+		"task_type", string(payload.TaskType),
+		"model", string(payload.Model),
+		"run_timestamp", payload.RunTimestamp.String(),
+	)
+	return fmt.Sprintf("stub_job_%s_%s", payload.TaskType, payload.Model), nil
+}
+
+func (s *StubRunPodClient) CancelJob(ctx context.Context, externalID string) error {
+	s.logger.InfoContext(ctx, "stub: CancelJob called",
+		"external_id", externalID,
+	)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Interface Compliance
 // ---------------------------------------------------------------------------
@@ -203,3 +230,4 @@ var _ OAuthProvider = (*StubOAuthProvider)(nil)
 var _ OAuthManager = (*StubOAuthManager)(nil)
 var _ WebhookVerifier = (*StubWebhookVerifier)(nil)
 var _ EmailVerifier = (*StubEmailVerifier)(nil)
+var _ RunPodClient = (*StubRunPodClient)(nil)

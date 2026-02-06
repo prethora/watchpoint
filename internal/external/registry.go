@@ -19,11 +19,12 @@ import (
 
 // ClientRegistry holds all external service client interfaces. It is the single
 // point of access for the rest of the application to interact with third-party
-// services (Stripe, SendGrid, OAuth providers).
+// services (Stripe, SendGrid, OAuth providers, RunPod).
 type ClientRegistry struct {
 	Billing BillingService
 	Email   EmailProvider
 	OAuth   OAuthManager
+	RunPod  RunPodClient
 
 	// Verifiers
 	StripeVerifier WebhookVerifier
@@ -95,6 +96,7 @@ func newStubRegistry(logger *slog.Logger) *ClientRegistry {
 		Billing:        NewStubBillingService(stubLogger),
 		Email:          NewStubEmailProvider(stubLogger),
 		OAuth:          NewStubOAuthManager(stubLogger, "google", "github"),
+		RunPod:         NewStubRunPodClient(stubLogger),
 		StripeVerifier: NewStubWebhookVerifier(stubLogger),
 		EmailVerifier:  NewStubEmailVerifier(stubLogger),
 	}
@@ -126,6 +128,15 @@ func newProductionRegistry(cfg *config.Config, logger *slog.Logger, rc *registry
 
 	// SendGrid email verifier (real implementation).
 	reg.EmailVerifier = &SendGridVerifier{}
+
+	// --- RunPod (Inference) ---
+	// Timeout: 30 seconds for RunPod API calls (trigger/cancel, not the job itself).
+	runpodHTTPClient := &http.Client{Timeout: 30 * time.Second}
+	reg.RunPod = NewRunPodClient(runpodHTTPClient, RunPodClientConfig{
+		APIKey:     cfg.Forecast.RunPodAPIKey.Unmask(),
+		EndpointID: cfg.Forecast.RunPodEndpointID,
+		Logger:     logger.With("client", "runpod"),
+	})
 
 	// --- OAuth ---
 	oauthHTTPClient := &http.Client{Timeout: 10 * time.Second}

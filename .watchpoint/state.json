@@ -1538,11 +1538,11 @@
           "FCST-004"
         ],
         "definition_of_done": "Unit tests using `httptest` verify correct JSON serialization of the `InferencePayload`.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T11:47:04.850326+00:00",
+        "completed_at": "2026-02-06T11:52:33.388991+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
