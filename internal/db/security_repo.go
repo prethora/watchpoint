@@ -2,7 +2,10 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"watchpoint/internal/types"
 )
@@ -96,4 +99,15 @@ func nilIfZeroTime(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// isUniqueViolation checks if the error is a PostgreSQL unique constraint
+// violation (error code 23505). Used by repositories to detect duplicate
+// key conflicts and return appropriate application-level errors.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
+	return false
 }

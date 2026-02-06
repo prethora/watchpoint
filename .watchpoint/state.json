@@ -1015,11 +1015,11 @@
           "OBS-011"
         ],
         "definition_of_done": "Integration tests verify CRUD, constraints, and audit log filtering.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:39:56.003405+00:00",
+        "completed_at": "2026-02-06T03:49:04.199431+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

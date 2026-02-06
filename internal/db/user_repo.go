@@ -295,3 +295,117 @@ func (r *UserRepository) UpdateLastLogin(ctx context.Context, userID string) err
 	}
 	return nil
 }
+
+// CountOwners returns the number of active users with the 'owner' role for
+// the given organization. Used by deletion and role-change logic to enforce
+// the "last owner" constraint (05d-api-organization.md Section 4.4).
+//
+// Note: The handler layer must use SELECT ... FOR UPDATE or serializable
+// isolation when counting owners to prevent concurrent race conditions from
+// deleting the final owner. This method performs a plain COUNT; the caller
+// is responsible for acquiring the appropriate lock within a transaction.
+func (r *UserRepository) CountOwners(ctx context.Context, orgID string) (int, error) {
+	var count int
+	err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM users
+		 WHERE organization_id = $1 AND role = 'owner' AND deleted_at IS NULL`,
+		orgID,
+	).Scan(&count)
+	if err != nil {
+		return 0, types.NewAppError(types.ErrCodeInternalDB, "failed to count owners", err)
+	}
+	return count, nil
+}
+
+// CreateInvited creates a new user in 'invited' state with a hashed invite
+// token and expiry. Used by the Invite User flow (USER-004).
+//
+// The tokenHash is a bcrypt or SHA-256 hash of the raw invite token that was
+// sent to the user via email. The raw token is never stored.
+//
+// Returns ErrConflictEmail (409) if a user with the same email already exists
+// (unique constraint violation on idx_users_email).
+func (r *UserRepository) CreateInvited(ctx context.Context, user *types.User, tokenHash string, expiresAt time.Time) error {
+	_, err := r.db.Exec(ctx,
+		`INSERT INTO users (id, organization_id, email, role, status,
+		 invite_token_hash, invite_expires_at, created_at)
+		 VALUES ($1, $2, $3, $4, 'invited', $5, $6, COALESCE($7, NOW()))`,
+		user.ID,
+		user.OrganizationID,
+		user.Email,
+		user.Role,
+		tokenHash,
+		expiresAt,
+		nilIfZeroTime(user.CreatedAt),
+	)
+	if err != nil {
+		// Check for unique constraint violation on email
+		if isUniqueViolation(err) {
+			return types.NewAppError(types.ErrCodeConflictEmail, "user already exists", err)
+		}
+		return types.NewAppError(types.ErrCodeInternalDB, "failed to create invited user", err)
+	}
+	return nil
+}
+
+// Update applies changes to a user record. Updates the mutable fields: email,
+// name, and role. Used by the role change flow (USER-009) and admin user
+// management.
+func (r *UserRepository) Update(ctx context.Context, user *types.User) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE users SET email = $1, name = $2, role = $3
+		 WHERE id = $4 AND organization_id = $5 AND deleted_at IS NULL`,
+		user.Email,
+		nilIfEmpty(user.Name),
+		user.Role,
+		user.ID,
+		user.OrganizationID,
+	)
+	if err != nil {
+		return types.NewAppError(types.ErrCodeInternalDB, "failed to update user", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return types.NewAppError(types.ErrCodeNotFoundUser, "user not found", nil)
+	}
+	return nil
+}
+
+// Delete performs a soft delete on a user by setting deleted_at = NOW().
+// Used by the User Removal flow (USER-010).
+// The caller is responsible for session invalidation and cascading effects
+// within the same transaction.
+func (r *UserRepository) Delete(ctx context.Context, id string, orgID string) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE users SET deleted_at = NOW()
+		 WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+		id,
+		orgID,
+	)
+	if err != nil {
+		return types.NewAppError(types.ErrCodeInternalDB, "failed to delete user", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return types.NewAppError(types.ErrCodeNotFoundUser, "user not found", nil)
+	}
+	return nil
+}
+
+// UpdateInviteToken updates only the invite token hash and expiry for an
+// existing invited user. Used by the Resend Invite flow (USER-004) to
+// regenerate tokens without creating a new user record.
+func (r *UserRepository) UpdateInviteToken(ctx context.Context, userID string, tokenHash string, expiresAt time.Time) error {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE users SET invite_token_hash = $1, invite_expires_at = $2
+		 WHERE id = $3 AND status = 'invited' AND deleted_at IS NULL`,
+		tokenHash,
+		expiresAt,
+		userID,
+	)
+	if err != nil {
+		return types.NewAppError(types.ErrCodeInternalDB, "failed to update invite token", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return types.NewAppError(types.ErrCodeNotFoundUser, "user not found or not in invited state", nil)
+	}
+	return nil
+}

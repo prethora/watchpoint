@@ -495,3 +495,342 @@ func TestUserRepository_CreateWithProvider_DBError(t *testing.T) {
 
 	db.AssertExpectations(t)
 }
+
+// ============================================================
+// CountOwners Tests
+// ============================================================
+
+func TestUserRepository_CountOwners_Success(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	row := &mockRow{
+		scanFn: func(dest ...any) error {
+			*dest[0].(*int) = 2
+			return nil
+		},
+	}
+	db.On("QueryRow", ctx, mock.AnythingOfType("string"), []any{"org_456"}).Return(row)
+
+	count, err := repo.CountOwners(ctx, "org_456")
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_CountOwners_Zero(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	row := &mockRow{
+		scanFn: func(dest ...any) error {
+			*dest[0].(*int) = 0
+			return nil
+		},
+	}
+	db.On("QueryRow", ctx, mock.AnythingOfType("string"), []any{"org_empty"}).Return(row)
+
+	count, err := repo.CountOwners(ctx, "org_empty")
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_CountOwners_DBError(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	row := &mockRow{scanErr: errors.New("db error")}
+	db.On("QueryRow", ctx, mock.AnythingOfType("string"), []any{"org_456"}).Return(row)
+
+	_, err := repo.CountOwners(ctx, "org_456")
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeInternalDB, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+// ============================================================
+// CreateInvited Tests
+// ============================================================
+
+func TestUserRepository_CreateInvited_Success(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	now := time.Date(2026, 2, 6, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(72 * time.Hour)
+
+	user := &types.User{
+		ID:             "user_invite1",
+		OrganizationID: "org_456",
+		Email:          "invited@example.com",
+		Role:           types.RoleMember,
+		CreatedAt:      now,
+	}
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), mock.Anything).
+		Return(pgconn.NewCommandTag("INSERT 0 1"), nil)
+
+	err := repo.CreateInvited(ctx, user, "bcrypt_hash_123", expiresAt)
+	require.NoError(t, err)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_CreateInvited_DuplicateEmail(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	user := &types.User{
+		ID:             "user_dup_invite",
+		OrganizationID: "org_456",
+		Email:          "existing@example.com",
+		Role:           types.RoleMember,
+	}
+
+	// Simulate unique constraint violation (PG error code 23505)
+	pgErr := &pgconn.PgError{Code: "23505"}
+	db.On("Exec", ctx, mock.AnythingOfType("string"), mock.Anything).
+		Return(pgconn.CommandTag{}, pgErr)
+
+	expiresAt := time.Now().Add(72 * time.Hour)
+	err := repo.CreateInvited(ctx, user, "hash", expiresAt)
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeConflictEmail, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_CreateInvited_DBError(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	user := &types.User{
+		ID:             "user_invite_err",
+		OrganizationID: "org_456",
+		Email:          "error@example.com",
+		Role:           types.RoleMember,
+	}
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), mock.Anything).
+		Return(pgconn.CommandTag{}, errors.New("connection refused"))
+
+	expiresAt := time.Now().Add(72 * time.Hour)
+	err := repo.CreateInvited(ctx, user, "hash", expiresAt)
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeInternalDB, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+// ============================================================
+// Update Tests
+// ============================================================
+
+func TestUserRepository_Update_Success(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	user := &types.User{
+		ID:             "user_123",
+		OrganizationID: "org_456",
+		Email:          "updated@example.com",
+		Name:           "Updated Name",
+		Role:           types.RoleAdmin,
+	}
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), mock.Anything).
+		Return(pgconn.NewCommandTag("UPDATE 1"), nil)
+
+	err := repo.Update(ctx, user)
+	require.NoError(t, err)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_Update_NotFound(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	user := &types.User{
+		ID:             "user_missing",
+		OrganizationID: "org_456",
+		Email:          "missing@example.com",
+		Role:           types.RoleMember,
+	}
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), mock.Anything).
+		Return(pgconn.NewCommandTag("UPDATE 0"), nil)
+
+	err := repo.Update(ctx, user)
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeNotFoundUser, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_Update_DBError(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	user := &types.User{
+		ID:             "user_123",
+		OrganizationID: "org_456",
+		Email:          "test@example.com",
+		Role:           types.RoleMember,
+	}
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), mock.Anything).
+		Return(pgconn.CommandTag{}, errors.New("db error"))
+
+	err := repo.Update(ctx, user)
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeInternalDB, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+// ============================================================
+// Delete Tests (Soft Delete)
+// ============================================================
+
+func TestUserRepository_Delete_Success(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), []any{"user_123", "org_456"}).
+		Return(pgconn.NewCommandTag("UPDATE 1"), nil)
+
+	err := repo.Delete(ctx, "user_123", "org_456")
+	require.NoError(t, err)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_Delete_NotFound(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), []any{"user_missing", "org_456"}).
+		Return(pgconn.NewCommandTag("UPDATE 0"), nil)
+
+	err := repo.Delete(ctx, "user_missing", "org_456")
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeNotFoundUser, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_Delete_DBError(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"), []any{"user_123", "org_456"}).
+		Return(pgconn.CommandTag{}, errors.New("db error"))
+
+	err := repo.Delete(ctx, "user_123", "org_456")
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeInternalDB, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+// ============================================================
+// UpdateInviteToken Tests
+// ============================================================
+
+func TestUserRepository_UpdateInviteToken_Success(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	expiresAt := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"),
+		[]any{"new_token_hash", expiresAt, "user_invite1"}).
+		Return(pgconn.NewCommandTag("UPDATE 1"), nil)
+
+	err := repo.UpdateInviteToken(ctx, "user_invite1", "new_token_hash", expiresAt)
+	require.NoError(t, err)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_UpdateInviteToken_NotInvited(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	expiresAt := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	// User is active (not invited), so WHERE status='invited' won't match
+	db.On("Exec", ctx, mock.AnythingOfType("string"),
+		[]any{"new_hash", expiresAt, "user_active"}).
+		Return(pgconn.NewCommandTag("UPDATE 0"), nil)
+
+	err := repo.UpdateInviteToken(ctx, "user_active", "new_hash", expiresAt)
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeNotFoundUser, appErr.Code)
+
+	db.AssertExpectations(t)
+}
+
+func TestUserRepository_UpdateInviteToken_DBError(t *testing.T) {
+	db := new(mockDBTX)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	expiresAt := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	db.On("Exec", ctx, mock.AnythingOfType("string"),
+		[]any{"hash", expiresAt, "user_1"}).
+		Return(pgconn.CommandTag{}, errors.New("db error"))
+
+	err := repo.UpdateInviteToken(ctx, "user_1", "hash", expiresAt)
+	require.Error(t, err)
+
+	var appErr *types.AppError
+	require.True(t, errors.As(err, &appErr))
+	assert.Equal(t, types.ErrCodeInternalDB, appErr.Code)
+
+	db.AssertExpectations(t)
+}
