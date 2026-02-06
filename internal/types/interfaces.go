@@ -56,10 +56,22 @@ type TransactionManager interface {
 }
 
 // NotificationChannel defines the interface for a notification delivery channel.
+// Implemented by email and webhook workers (08b, 08c).
 type NotificationChannel interface {
+	// Type returns the channel type (e.g., "email", "webhook").
 	Type() ChannelType
-	Format(n *Notification) ([]byte, error)
+
+	// ValidateConfig checks if the channel config is valid (used in Test Mode/API).
+	ValidateConfig(config map[string]any) error
+
+	// Format transforms the generic Notification into a channel-specific payload.
+	// For Webhooks, this handles platform detection (Slack vs Generic).
+	Format(ctx context.Context, n *Notification, config map[string]any) ([]byte, error)
+
+	// Deliver executes the transmission.
 	Deliver(ctx context.Context, payload []byte, destination string) (*DeliveryResult, error)
+
+	// ShouldRetry inspects an error to determine if it is transient.
 	ShouldRetry(err error) bool
 }
 

@@ -290,12 +290,15 @@ type NotificationDelivery struct {
 	ProviderMsgID  string         `db:"provider_message_id"`
 }
 
-// DeliveryResult tracks the outcome of a notification attempt.
+// DeliveryResult tracks the outcome of a notification delivery attempt.
+// Used by NotificationChannel implementations to report delivery status.
 type DeliveryResult struct {
 	ProviderMessageID string
-	Status            string
+	Status            DeliveryStatus // "sent", "failed", "bounced"
 	FailureReason     string
 	Retryable         bool
+	Terminal          bool           // If true, disable channel immediately (e.g., HTTP 410)
+	RetryAfter        *time.Duration // For HTTP 429 support - when to retry
 }
 
 // OAuthProfile is the normalized user data from an external provider.

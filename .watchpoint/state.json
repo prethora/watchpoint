@@ -1842,11 +1842,11 @@
           "NOTIF-010"
         ],
         "definition_of_done": "Unit tests verify Quiet Hours logic correctly handles timezone conversion and exceptions. Integration tests verify DB state transitions.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T15:37:02.034486+00:00",
+        "completed_at": "2026-02-06T15:46:03.965647+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
