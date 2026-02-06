@@ -352,11 +352,11 @@
           "NOTIF-001"
         ],
         "definition_of_done": "Script exists. When run via docker-compose, logs show successful creation of buckets on MinIO and queues on LocalStack.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T00:11:53.000162+00:00",
+        "completed_at": "2026-02-06T00:15:59.518102+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
