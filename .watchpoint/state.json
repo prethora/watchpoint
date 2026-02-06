@@ -1905,11 +1905,11 @@
           "VERT-003"
         ],
         "definition_of_done": "Integration test: Enqueue SQS message -> `EmailChannel` processes -> Mock Provider receives correct payload.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T15:59:24.643236+00:00",
+        "completed_at": "2026-02-06T16:08:14.108889+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
