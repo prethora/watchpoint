@@ -1138,11 +1138,11 @@
           "HOOK-001"
         ],
         "definition_of_done": "Integration tests verify JSONB handling, atomic updates, and list filters.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T08:36:40.382716+00:00",
+        "completed_at": "2026-02-06T08:50:51.187879+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
