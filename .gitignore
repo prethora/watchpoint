@@ -49,8 +49,8 @@ __pycache__/
 venv/
 .venv/
 
-# Reports (generated, not source)
-reports/
+# Reports (generated, not source — top-level only)
+/reports/
 
 # Scratchpad
 scratchpad/
