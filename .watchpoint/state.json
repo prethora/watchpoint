@@ -2053,11 +2053,11 @@
           "EVAL-001"
         ],
         "definition_of_done": "Running `python worker/eval/dev_runner.py` connects to LocalStack and processes a manually enqueued SQS message.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T17:21:35.209275+00:00",
+        "completed_at": "2026-02-06T17:26:24.148891+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
