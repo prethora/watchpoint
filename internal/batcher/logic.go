@@ -63,12 +63,14 @@ type BatcherConfig struct {
 }
 
 // RunContext encapsulates the metadata extracted from the S3 trigger event.
+// JSON tags are included to support manual recovery via custom JSON payloads
+// (architecture/06-batcher.md Section 6 -- "custom JSON for manual recovery").
 // Architecture reference: architecture/06-batcher.md Section 3.2
 type RunContext struct {
-	Model     types.ForecastType
-	Timestamp time.Time
-	Bucket    string
-	Key       string
+	Model     types.ForecastType `json:"model"`
+	Timestamp time.Time          `json:"timestamp"`
+	Bucket    string             `json:"bucket,omitempty"`
+	Key       string             `json:"key,omitempty"`
 }
 
 // Batcher orchestrates the core business logic for translating a "Forecast Ready"
