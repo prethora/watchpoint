@@ -1486,11 +1486,11 @@
           "INT-002"
         ],
         "definition_of_done": "Script runs successfully and outputs 'Phase 6 Verified'.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T11:33:18.001120+00:00",
+        "completed_at": "2026-02-06T11:40:37.557447+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       }
     ],
