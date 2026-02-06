@@ -700,47 +700,61 @@ aws --endpoint-url=http://localhost:4566 events put-events \
 
 ```python
 # scripts/generate_sample_forecast.py
+# See scripts/generate_sample_forecast.py for the full implementation,
+# which supports both Random and Scenario modes and handles Zarr v2/v3
+# codec API differences automatically.
 import numpy as np
 import zarr
 import s3fs
 
 def generate_sample_forecast():
     """Generate a sample Zarr forecast for local testing."""
-    
+
     # Connect to MinIO
     fs = s3fs.S3FileSystem(
         endpoint_url='http://localhost:9000',
         key='minioadmin',
         secret='minioadmin'
     )
-    
+
     # Sample data (small for testing)
     # Shape: (lat, lon, time, variables)
     data = np.random.rand(92, 182, 24, 8).astype(np.float32)
-    
+
     # Write to MinIO
     prefix = "watchpoint-forecasts/medium_range/2026-01-31T06:00:00Z"
     store = s3fs.S3Map(root=prefix, s3=fs)
-    
+
+    # Note: Zarr v3 uses zarr.codecs.ZstdCodec instead of zarr.Zstd.
+    # The actual implementation in scripts/generate_sample_forecast.py
+    # detects the version at import time and uses the correct API.
     z = zarr.open_array(
         store,
         mode='w',
         shape=data.shape,
         chunks=(92, 182, 24, 8),
         dtype='<f4',
-        compressor=zarr.Zstd(level=3),
+        compressor=zarr.Zstd(level=3),  # Zarr v2 API
         filters=None
     )
     z[:] = data
-    
+
     zarr.consolidate_metadata(store)
     fs.touch(f"{prefix}/_SUCCESS")
-    
+
     print(f"Sample forecast written to {prefix}")
 
 if __name__ == "__main__":
     generate_sample_forecast()
 ```
+
+> **Implementation Note (Phase 9 — Integration Testing):**
+> The sample code above uses the Zarr v2 API (`zarr.Zstd`, `compressor=`).
+> Since `requirements.txt` specifies `zarr>=2.16.0`, Zarr v3.x may be
+> installed, which uses a different codec API (`zarr.codecs.ZstdCodec`,
+> `compressors=[]`). The actual implementation in
+> `scripts/generate_sample_forecast.py` detects the installed version at
+> import time and uses the correct API for backward compatibility.
 
 ### Running Locally
 

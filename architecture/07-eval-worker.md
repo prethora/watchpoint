@@ -572,6 +572,7 @@ numpy>=1.24.0
 xarray>=2023.0.0
 zarr>=2.16.0
 s3fs>=2023.6.0
+scipy>=1.11.0
 pandas>=2.0.0
 
 # Infrastructure
@@ -581,6 +582,22 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0
 aws-lambda-powertools>=2.0.0  # Structured logging & metrics
 ```
+
+> **Implementation Note (Phase 9 — Integration Testing):**
+> `scipy` was added as an explicit dependency. It is required at runtime by
+> `xarray.Dataset.interp()` (used in `TileData.extract_point` for bilinear
+> interpolation). Without it, the eval worker fails with
+> `ModuleNotFoundError: No module named 'scipy'` when processing any
+> WatchPoint whose coordinates do not land exactly on a grid cell. This
+> dependency was implicit in the original specification — the architecture
+> correctly calls for bilinear interpolation (Section 4.1) but the
+> requirements listing did not include the library that implements it.
+>
+> Additionally, code that reads or writes Zarr stores must handle both
+> Zarr v2 and v3 APIs, as `zarr>=2.16.0` permits installation of Zarr 3.x,
+> which has breaking changes to the codec and timestamp handling APIs.
+> The forecast seeder and monitor evaluator were updated during integration
+> testing to be backward-compatible with both versions.
 
 ### 7.2 Settings Loader
 
