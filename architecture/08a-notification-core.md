@@ -330,7 +330,7 @@ type PolicyEngine interface {
 type DigestGenerator interface {
     Generate(ctx context.Context,
              wp *types.WatchPoint,
-             currentForecast *types.EvaluationResult,
+             current *types.MonitorSummary,
              previousDigest *DigestContent,
              digestConfig *types.DigestConfig) (*DigestContent, error)
 }
