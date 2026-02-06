@@ -479,6 +479,95 @@ func (r *WatchPointRepository) List(ctx context.Context, orgID string, params Li
 	return results, pageInfo, nil
 }
 
+// CreateBatch inserts multiple WatchPoints in a single atomic INSERT statement.
+// The caller must pre-populate all required fields (including IDs) before calling.
+//
+// Returns:
+//   - createdIndices: indices (0-based) of successfully inserted WatchPoints
+//   - failedIndices: map of index -> error for WatchPoints that failed DB insertion
+//   - err: non-nil only if a systemic error prevents the entire batch (not per-item)
+//
+// Per WPLC-011 flow simulation: Uses a single INSERT statement for atomicity.
+// tile_id is NOT included because it is a GENERATED ALWAYS column.
+func (r *WatchPointRepository) CreateBatch(ctx context.Context, wps []*types.WatchPoint) ([]int, map[int]error, error) {
+	if len(wps) == 0 {
+		return nil, nil, nil
+	}
+
+	// Build a multi-row INSERT with numbered placeholders.
+	const colCount = 22 // Number of columns in the INSERT
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO watchpoints (
+		id, organization_id, name,
+		location_lat, location_lon, location_display_name,
+		timezone,
+		time_window_start, time_window_end, monitor_config,
+		conditions, condition_logic,
+		channels, template_set, preferences,
+		status, test_mode, tags, config_version, source,
+		created_at, updated_at
+	) VALUES `)
+
+	args := make([]any, 0, len(wps)*colCount)
+	for i, wp := range wps {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		base := i * colCount
+		sb.WriteString("(")
+		for j := 0; j < colCount; j++ {
+			if j > 0 {
+				sb.WriteString(", ")
+			}
+			if j == 20 { // created_at
+				sb.WriteString(fmt.Sprintf("COALESCE($%d, NOW())", base+j+1))
+			} else if j == 21 { // updated_at
+				sb.WriteString(fmt.Sprintf("COALESCE($%d, NOW())", base+j+1))
+			} else {
+				sb.WriteString(fmt.Sprintf("$%d", base+j+1))
+			}
+		}
+		sb.WriteString(")")
+
+		args = append(args,
+			wp.ID,
+			wp.OrganizationID,
+			wp.Name,
+			wp.Location.Lat,
+			wp.Location.Lon,
+			nilIfEmpty(wp.Location.DisplayName),
+			wp.Timezone,
+			timeWindowStart(wp.TimeWindow),
+			timeWindowEnd(wp.TimeWindow),
+			wp.MonitorConfig,
+			wp.Conditions,
+			wp.ConditionLogic,
+			wp.Channels,
+			nilIfEmpty(wp.TemplateSet),
+			wp.NotificationPrefs,
+			wp.Status,
+			wp.TestMode,
+			wp.Tags,
+			wp.ConfigVersion,
+			nilIfEmpty(wp.Source),
+			nilIfZeroTime(wp.CreatedAt),
+			nilIfZeroTime(wp.UpdatedAt),
+		)
+	}
+
+	_, err := r.db.Exec(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, nil, types.NewAppError(types.ErrCodeInternalDB, "failed to batch create watchpoints", err)
+	}
+
+	// All rows inserted successfully in the atomic statement.
+	createdIndices := make([]int, len(wps))
+	for i := range wps {
+		createdIndices[i] = i
+	}
+	return createdIndices, nil, nil
+}
+
 // UpdateStatusBatch updates the status of multiple WatchPoints in a single query.
 // The testMode parameter enforces strict environment isolation, ensuring Live and
 // Test Mode WatchPoints are never mixed in a single batch update.

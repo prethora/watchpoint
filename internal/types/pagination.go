@@ -58,8 +58,9 @@ const (
 	AuditActionWatchPointBulkCreated = "watchpoint.bulk_created"
 	AuditActionWatchPointBulkPaused  = "watchpoint.bulk_paused"
 	AuditActionWatchPointBulkResumed = "watchpoint.bulk_resumed"
-	AuditActionWatchPointBulkDeleted = "watchpoint.bulk_deleted"
-	AuditActionWatchPointBulkCloned  = "watchpoint.bulk_cloned"
+	AuditActionWatchPointBulkDeleted    = "watchpoint.bulk_deleted"
+	AuditActionWatchPointBulkCloned     = "watchpoint.bulk_cloned"
+	AuditActionWatchPointBulkTagUpdated = "watchpoint.bulk_tags_updated"
 )
 
 // AuditQueryFilters defines parameters for querying audit log entries.

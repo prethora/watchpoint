@@ -1220,11 +1220,11 @@
           "BULK-005"
         ],
         "definition_of_done": "Tests verify error aggregation logic in BulkCreate.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T09:14:34.918131+00:00",
+        "completed_at": "2026-02-06T09:22:49.768039+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

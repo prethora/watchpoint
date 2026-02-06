@@ -25,6 +25,7 @@ const (
 	ErrCodeValidationMaxConditions     ErrorCode = "validation_too_many_conditions"
 	ErrCodeValidationBatchSize         ErrorCode = "validation_batch_size_exceeded"
 	ErrCodeValidationInvalidVariable   ErrorCode = "validation_invalid_variable"
+	ErrCodeBulkPartialFailure          ErrorCode = "bulk_partial_failure"
 
 	// Auth (401)
 	ErrCodeAuthTokenMissing      ErrorCode = "auth_token_missing"
