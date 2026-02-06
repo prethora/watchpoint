@@ -1348,11 +1348,11 @@
           "FCST-002"
         ],
         "definition_of_done": "Unit test writes a mock Zarr to a temporary directory. `xarray.open_zarr` confirms successful read and correct dimensions.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T10:10:16.982657+00:00",
+        "completed_at": "2026-02-06T10:22:55.513177+00:00",
+        "satisfaction_iterations": 3,
         "skip_reason": null
       },
       {
