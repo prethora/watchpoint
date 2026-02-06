@@ -1179,11 +1179,11 @@
           "WPLC-006"
         ],
         "definition_of_done": "Unit tests using a Mock SQS Client verify correct Queue URL selection and JSON payload serialization.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T08:59:07.966150+00:00",
+        "completed_at": "2026-02-06T09:03:29.803184+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
