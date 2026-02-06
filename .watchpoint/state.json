@@ -1740,11 +1740,11 @@
           "SCHED-001"
         ],
         "definition_of_done": "Handler compiles. Unit test verifies routing.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T14:56:10.575351+00:00",
+        "completed_at": "2026-02-06T15:02:54.893802+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
