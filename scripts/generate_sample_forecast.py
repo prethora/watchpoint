@@ -69,7 +69,13 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from numcodecs import Zstd
+import zarr as _zarr_mod
+
+_ZARR_MAJOR = int(_zarr_mod.__version__.split(".")[0])
+if _ZARR_MAJOR >= 3:
+    from zarr.codecs import ZstdCodec as _ZstdCodec  # type: ignore[import-untyped]
+else:
+    from numcodecs import Zstd
 
 # ---------------------------------------------------------------------------
 # Ensure project root is on sys.path so we can import runpod/worker modules.
@@ -489,20 +495,25 @@ def write_forecast(
     endpoint_url : str or None
         MinIO endpoint URL for local development. Only used for S3 destinations.
     """
-    compressor = Zstd(level=ZSTD_COMPRESSION_LEVEL)
+    # Zarr 3 requires native zarr.codecs; Zarr 2 uses numcodecs.
+    if _ZARR_MAJOR >= 3:
+        comp_key = "compressors"
+        comp_val = [_ZstdCodec(level=ZSTD_COMPRESSION_LEVEL)]
+    else:
+        comp_key = "compressor"
+        comp_val = Zstd(level=ZSTD_COMPRESSION_LEVEL)
 
-    # Set encoding for each variable
     time_size = ds.sizes["time"]
     encoding: dict[str, dict[str, Any]] = {}
     for var_name in ds.data_vars:
         encoding[var_name] = {
-            "compressor": compressor,
+            comp_key: comp_val,
             "dtype": "float32",
             "chunks": (time_size, TILE_LAT_CHUNK, TILE_LON_CHUNK),
         }
     for coord_name in ["time", "lat", "lon"]:
         encoding[coord_name] = {
-            "compressor": compressor,
+            comp_key: comp_val,
         }
 
     if destination.startswith("s3://"):

@@ -850,7 +850,6 @@ type DeliveryResult struct {
 	ChannelType    string
 	Status         string
 	AttemptCount   int
-	CreatedAt      time.Time
 }
 
 // QueryNotificationDeliveries returns all delivery records for a given notification ID.
@@ -860,10 +859,10 @@ func QueryNotificationDeliveries(t *testing.T, env *TestEnv, notificationID stri
 	t.Helper()
 
 	rows, err := env.Pool.Query(context.Background(),
-		`SELECT id, notification_id, channel_type, status, attempt_count, created_at
+		`SELECT id, notification_id, channel_type, status, attempt_count
 		 FROM notification_deliveries
 		 WHERE notification_id = $1
-		 ORDER BY created_at ASC`,
+		 ORDER BY id ASC`,
 		notificationID,
 	)
 	if err != nil {
@@ -874,7 +873,7 @@ func QueryNotificationDeliveries(t *testing.T, env *TestEnv, notificationID stri
 	var results []DeliveryResult
 	for rows.Next() {
 		var d DeliveryResult
-		if err := rows.Scan(&d.ID, &d.NotificationID, &d.ChannelType, &d.Status, &d.AttemptCount, &d.CreatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.NotificationID, &d.ChannelType, &d.Status, &d.AttemptCount); err != nil {
 			t.Fatalf("QueryNotificationDeliveries: scan failed: %v", err)
 		}
 		results = append(results, d)

@@ -190,10 +190,15 @@ class MonitorEvaluator:
         """
         result: list[datetime] = []
         for t in time_values:
-            # Convert numpy datetime64 -> Python datetime (UTC)
-            ts = (t - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(
-                1, "s"
-            )
+            # Convert time value -> Python datetime (UTC).
+            # Zarr 2 returns numpy.datetime64; Zarr 3 may return int64 (epoch ns).
+            if isinstance(t, (np.datetime64,)):
+                ts = (t - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(
+                    1, "s"
+                )
+            else:
+                # int64 nanoseconds since epoch
+                ts = float(t) / 1e9 if abs(float(t)) > 1e12 else float(t)
             utc_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
             # Convert to local timezone
             local_dt = utc_dt.astimezone(local_tz)
