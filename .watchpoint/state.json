@@ -1926,11 +1926,11 @@
           "USER-014"
         ],
         "definition_of_done": "Integration test simulates 3 bounces and verifies the channel is disabled in the DB.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T16:08:25.915445+00:00",
+        "completed_at": "2026-02-06T16:15:19.881676+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

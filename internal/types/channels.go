@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // Channel represents a notification delivery channel configuration.
@@ -14,6 +15,13 @@ type Channel struct {
 	Type    ChannelType    `json:"type"`
 	Config  map[string]any `json:"config"`
 	Enabled bool           `json:"enabled"`
+
+	// Health Tracking fields (08a-notification-core.md Section 2.2).
+	// Used by the BounceProcessor and ChannelHealthRepository to track
+	// channel reliability and trigger automatic disabling after repeated failures.
+	FailureCount   int        `json:"failure_count"`
+	DisabledReason string     `json:"disabled_reason,omitempty"`
+	LastFailedAt   *time.Time `json:"last_failed_at,omitempty"`
 }
 
 // ChannelList is a slice of Channel.
