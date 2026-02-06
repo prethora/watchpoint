@@ -1367,11 +1367,11 @@
           "FCST-003"
         ],
         "definition_of_done": "Running `python runpod/sim.py` starts a server. `curl` with a payload triggers Zarr creation in MinIO.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T10:23:08.381537+00:00",
+        "completed_at": "2026-02-06T10:46:18.904266+00:00",
+        "satisfaction_iterations": 3,
         "skip_reason": null
       },
       {
