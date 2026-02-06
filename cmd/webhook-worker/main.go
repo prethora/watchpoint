@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -571,6 +572,46 @@ func main() {
 		"timeout", webhookCfg.DefaultTimeout.String(),
 		"max_redirects", webhookCfg.MaxRedirects,
 	)
+
+	// Local mode: read JSON SQS event from stdin instead of starting Lambda runtime.
+	// This enables local integration testing without the AWS Lambda RIE.
+	// Usage: echo '{"Records":[{"messageId":"1","body":"{...}"}]}' | go run cmd/webhook-worker/main.go
+	if os.Getenv("APP_ENV") == "local" {
+		logger.Info("APP_ENV=local: reading SQS event from stdin")
+		payload, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			logger.Error("Failed to read stdin", "error", err)
+			os.Exit(1)
+		}
+		if len(payload) == 0 {
+			logger.Error("No input received on stdin")
+			os.Exit(1)
+		}
+		var sqsEvent events.SQSEvent
+		if err := json.Unmarshal(payload, &sqsEvent); err != nil {
+			logger.Error("Failed to parse stdin as SQS event", "error", err)
+			os.Exit(1)
+		}
+		ctx := context.Background()
+		response, err := handler.Handle(ctx, sqsEvent)
+		if err != nil {
+			logger.Error("Handler execution failed", "error", err)
+			os.Exit(1)
+		}
+		if len(response.BatchItemFailures) > 0 {
+			logger.Warn("Handler reported partial failures",
+				"failed_count", len(response.BatchItemFailures),
+			)
+			// Output the response for inspection.
+			respJSON, _ := json.MarshalIndent(response, "", "  ")
+			fmt.Fprintln(os.Stderr, string(respJSON))
+		}
+		logger.Info("Handler execution completed successfully",
+			"records_processed", len(sqsEvent.Records),
+			"failures", len(response.BatchItemFailures),
+		)
+		return
+	}
 
 	lambda.Start(handler.Handle)
 }

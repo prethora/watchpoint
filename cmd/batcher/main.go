@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -242,6 +243,29 @@ func main() {
 		"standard_queue", standardQueueURL,
 		"metric_namespace", metricNamespace,
 	)
+
+	// Local mode: read JSON event from stdin instead of starting Lambda runtime.
+	// This enables local integration testing without the AWS Lambda RIE.
+	// Usage: echo '{"model":"medium_range","timestamp":"..."}' | go run cmd/batcher/main.go
+	if os.Getenv("APP_ENV") == "local" {
+		logger.Info("APP_ENV=local: reading event from stdin")
+		payload, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			logger.Error("Failed to read stdin", "error", err)
+			os.Exit(1)
+		}
+		if len(payload) == 0 {
+			logger.Error("No input received on stdin")
+			os.Exit(1)
+		}
+		ctx := context.Background()
+		if err := b.Handler(ctx, json.RawMessage(payload)); err != nil {
+			logger.Error("Handler execution failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("Handler execution completed successfully")
+		return
+	}
 
 	lambda.Start(b.Handler)
 }
