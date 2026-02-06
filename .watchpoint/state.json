@@ -391,11 +391,11 @@
           "EVAL-001"
         ],
         "definition_of_done": "Files exist. `tile_id` logic matches spec exactly.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T00:18:39.713285+00:00",
+        "completed_at": "2026-02-06T00:20:50.541872+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
