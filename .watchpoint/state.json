@@ -691,11 +691,11 @@
           "API-002"
         ],
         "definition_of_done": "Unit tests pass verifying that structs with `ssrf_url` tags fail validation when passed bad URLs.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T01:38:38.491408+00:00",
+        "completed_at": "2026-02-06T01:43:56.723619+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
