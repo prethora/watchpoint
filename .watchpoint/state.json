@@ -933,11 +933,11 @@
           "BILL-008"
         ],
         "definition_of_done": "Interface exported. Unit test verifies all tiers return correct limits.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:13:35.041306+00:00",
+        "completed_at": "2026-02-06T03:16:00.775541+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
