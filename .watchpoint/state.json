@@ -1821,11 +1821,11 @@
           "NOTIF-001"
         ],
         "definition_of_done": "Struct exists and tags match the Python Pydantic model expectations (snake_case).",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T15:33:56.744573+00:00",
+        "completed_at": "2026-02-06T15:36:49.965600+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
