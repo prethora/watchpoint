@@ -96,6 +96,26 @@ func run() error {
 		r.Route("/auth", authHandler.RegisterRoutes)
 	})
 
+	// Wire the Billing handler with stub services.
+	// When real billing/usage services are available (from Phase 3-5),
+	// they will replace these stubs.
+	stubBillingSvc := &stubBillingHandlerService{}
+	stubOrgBillingRepo := &stubOrgBillingReader{}
+	stubUsageRep := &stubUsageReporterService{}
+	stubAudit := &stubAuditLoggerService{}
+
+	usageHandler := handlers.NewUsageHandler(stubUsageRep, stubOrgBillingRepo, srv.Validator)
+	billingHandler := handlers.NewBillingHandler(
+		stubBillingSvc,
+		stubOrgBillingRepo,
+		usageHandler,
+		stubAudit,
+		cfg,
+		srv.Validator,
+		logger,
+	)
+	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, billingHandler.RegisterRoutes)
+
 	// Mount all routes (middleware chain + versioned endpoints + health).
 	srv.MountRoutes()
 
@@ -302,6 +322,59 @@ func (s *stubSessionHandlerService) InvalidateSession(_ context.Context, _ strin
 	return nil
 }
 
+// stubBillingHandlerService implements handlers.BillingService with error responses.
+type stubBillingHandlerService struct{}
+
+func (s *stubBillingHandlerService) EnsureCustomer(_ context.Context, _, _ string) (string, error) {
+	return "", types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
+}
+
+func (s *stubBillingHandlerService) CreateCheckoutSession(_ context.Context, _ string, _ types.PlanTier, _ types.RedirectURLs) (string, string, error) {
+	return "", "", types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
+}
+
+func (s *stubBillingHandlerService) CreatePortalSession(_ context.Context, _, _ string) (string, error) {
+	return "", types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
+}
+
+func (s *stubBillingHandlerService) GetInvoices(_ context.Context, _ string, _ types.ListInvoicesParams) ([]*types.Invoice, types.PageInfo, error) {
+	return nil, types.PageInfo{}, types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
+}
+
+func (s *stubBillingHandlerService) GetSubscription(_ context.Context, _ string) (*types.SubscriptionDetails, error) {
+	return nil, types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
+}
+
+// stubOrgBillingReader implements handlers.OrgBillingReader with error responses.
+type stubOrgBillingReader struct{}
+
+func (s *stubOrgBillingReader) GetByID(_ context.Context, orgID string) (*types.Organization, error) {
+	return &types.Organization{
+		ID:           orgID,
+		Name:         "Stub Organization",
+		BillingEmail: "stub@example.com",
+		Plan:         types.PlanFree,
+	}, nil
+}
+
+// stubUsageReporterService implements handlers.UsageReporter with error responses.
+type stubUsageReporterService struct{}
+
+func (s *stubUsageReporterService) GetCurrentUsage(_ context.Context, _ string) (*types.UsageSnapshot, error) {
+	return nil, types.NewAppError(types.ErrCodeInternalUnexpected, "usage reporter not configured", nil)
+}
+
+func (s *stubUsageReporterService) GetUsageHistory(_ context.Context, _ string, _, _ time.Time, _ types.TimeGranularity) ([]*types.UsageDataPoint, error) {
+	return nil, types.NewAppError(types.ErrCodeInternalUnexpected, "usage reporter not configured", nil)
+}
+
+// stubAuditLoggerService implements handlers.AuditLogger with no-op behavior.
+type stubAuditLoggerService struct{}
+
+func (s *stubAuditLoggerService) Log(_ context.Context, _ types.AuditEvent) error {
+	return nil
+}
+
 // Compile-time interface assertions to ensure stubs satisfy their contracts.
 var (
 	_ types.RepositoryRegistry  = (*stubRepositoryRegistry)(nil)
@@ -312,4 +385,8 @@ var (
 	_ core.MetricsCollector     = (*stubMetricsCollector)(nil)
 	_ handlers.AuthService      = (*stubAuthHandlerService)(nil)
 	_ handlers.SessionService   = (*stubSessionHandlerService)(nil)
+	_ handlers.BillingService   = (*stubBillingHandlerService)(nil)
+	_ handlers.OrgBillingReader = (*stubOrgBillingReader)(nil)
+	_ handlers.UsageReporter    = (*stubUsageReporterService)(nil)
+	_ handlers.AuditLogger      = (*stubAuditLoggerService)(nil)
 )

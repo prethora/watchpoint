@@ -974,11 +974,11 @@
           "INFO-003"
         ],
         "definition_of_done": "Handlers pass unit tests. Checkout handler builds URLs using Config.DashboardURL.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:24:38.830498+00:00",
+        "completed_at": "2026-02-06T03:31:29.496628+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
