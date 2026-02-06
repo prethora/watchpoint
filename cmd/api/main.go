@@ -29,6 +29,7 @@ import (
 	"watchpoint/internal/billing"
 	"watchpoint/internal/config"
 	"watchpoint/internal/core"
+	"watchpoint/internal/forecasts"
 	"watchpoint/internal/types"
 )
 
@@ -95,6 +96,15 @@ func run() error {
 	)
 	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, func(r chi.Router) {
 		r.Route("/auth", authHandler.RegisterRoutes)
+	})
+
+	// Wire the Forecast handler with stub service.
+	// When real ForecastService/ForecastReader/ForecastRunRepository are available,
+	// they will replace this stub.
+	stubForecastSvc := &stubForecastHandlerService{}
+	forecastHandler := handlers.NewForecastHandler(stubForecastSvc, srv.Validator, logger)
+	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, func(r chi.Router) {
+		r.Route("/forecasts", forecastHandler.RegisterRoutes)
 	})
 
 	// Wire the Billing handler with stub services.
@@ -523,6 +533,35 @@ func (s *stubAPIKeyHandlerRepo) CountRecentByUser(_ context.Context, _ string, _
 	return 0, nil
 }
 
+// stubForecastHandlerService implements handlers.ForecastServiceInterface with error responses.
+// This stub returns ErrCodeUpstreamForecast for all operations until the real
+// ForecastService is wired with ForecastReader and ForecastRunRepository.
+type stubForecastHandlerService struct{}
+
+func (s *stubForecastHandlerService) GetPointForecast(_ context.Context, _, _ float64, _, _ time.Time) (*forecasts.ForecastResponse, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
+}
+
+func (s *stubForecastHandlerService) GetBatchForecast(_ context.Context, _ forecasts.BatchForecastRequest) (*forecasts.BatchForecastResult, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
+}
+
+func (s *stubForecastHandlerService) GetVariables(_ context.Context) ([]forecasts.VariableResponseMetadata, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
+}
+
+func (s *stubForecastHandlerService) GetStatus(_ context.Context) (*forecasts.SystemStatus, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
+}
+
+func (s *stubForecastHandlerService) GetSnapshot(_ context.Context, _, _ float64) (*types.ForecastSnapshot, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
+}
+
+func (s *stubForecastHandlerService) GetVerificationMetrics(_ context.Context, _ string, _, _ time.Time) (*forecasts.VerificationReport, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
+}
+
 // Compile-time interface assertions to ensure stubs satisfy their contracts.
 var (
 	_ types.RepositoryRegistry  = (*stubRepositoryRegistry)(nil)
@@ -549,4 +588,7 @@ var (
 	_ handlers.UserSessionRepo      = (*stubUserSessionRepo)(nil)
 	_ handlers.UserEmailService     = (*stubEmailServiceImpl)(nil)
 	_ handlers.APIKeyRepo           = (*stubAPIKeyHandlerRepo)(nil)
+
+	// Forecast handler stub
+	_ handlers.ForecastServiceInterface = (*stubForecastHandlerService)(nil)
 )

@@ -1117,11 +1117,11 @@
           "FQRY-002"
         ],
         "definition_of_done": "Service unit tests verify fallback logic. Handler returns correct JSON structure.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T08:31:02.548360+00:00",
+        "completed_at": "2026-02-06T08:36:25.764545+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {

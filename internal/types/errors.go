@@ -23,6 +23,8 @@ const (
 	ErrCodeValidationInvalidEmail      ErrorCode = "validation_invalid_email"
 	ErrCodeValidationInvalidWebhook    ErrorCode = "validation_invalid_webhook_url"
 	ErrCodeValidationMaxConditions     ErrorCode = "validation_too_many_conditions"
+	ErrCodeValidationBatchSize         ErrorCode = "validation_batch_size_exceeded"
+	ErrCodeValidationInvalidVariable   ErrorCode = "validation_invalid_variable"
 
 	// Auth (401)
 	ErrCodeAuthTokenMissing      ErrorCode = "auth_token_missing"
@@ -63,8 +65,9 @@ const (
 	ErrCodeConflictIdempotency ErrorCode = "conflict_idempotency_mismatch"
 
 	// Internal/Upstream (500/502)
-	ErrCodeInternalDB            ErrorCode = "internal_database_error"
-	ErrCodeInternalUnexpected    ErrorCode = "internal_unexpected_error"
+	ErrCodeInternalDB                  ErrorCode = "internal_database_error"
+	ErrCodeInternalUnexpected          ErrorCode = "internal_unexpected_error"
+	ErrCodeInternalForecastCorruption  ErrorCode = "internal_forecast_corruption"
 	ErrCodeUpstreamStripe        ErrorCode = "upstream_stripe_unavailable"
 	ErrCodeUpstreamEmailProvider ErrorCode = "upstream_email_provider_unavailable"
 	ErrCodeUpstreamForecast      ErrorCode = "upstream_forecast_unavailable"
