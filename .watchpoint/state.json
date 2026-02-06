@@ -954,11 +954,11 @@
           "BILL-008"
         ],
         "definition_of_done": "Integration tests verify aggregation queries against Docker DB.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T03:16:12.421211+00:00",
+        "completed_at": "2026-02-06T03:24:22.708457+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
