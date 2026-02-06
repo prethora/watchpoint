@@ -41,3 +41,43 @@ type RateLimitResult struct {
 	// ResetAt is the time when the current rate limit window resets.
 	ResetAt time.Time
 }
+
+// IdempotencyRecord represents a stored idempotency key entry.
+type IdempotencyRecord struct {
+	// Key is the client-provided idempotency key.
+	Key string
+	// OrganizationID scopes the key to a specific organization.
+	OrganizationID string
+	// Status is the current processing state: "processing", "completed", or "failed".
+	Status string
+	// ResponseCode is the HTTP status code of the completed response.
+	ResponseCode int
+	// ResponseBody is the complete response body as raw JSON bytes.
+	ResponseBody []byte
+}
+
+// Idempotency status constants.
+const (
+	IdempotencyStatusProcessing = "processing"
+	IdempotencyStatusCompleted  = "completed"
+	IdempotencyStatusFailed     = "failed"
+)
+
+// IdempotencyStore abstracts the backing store for idempotency key management.
+// Production uses PostgreSQL; dev/test uses in-memory.
+type IdempotencyStore interface {
+	// Get retrieves an existing idempotency record by key and organization ID.
+	// Returns nil and no error if the key does not exist.
+	Get(ctx context.Context, key string, orgID string) (*IdempotencyRecord, error)
+
+	// Create inserts a new idempotency record with status "processing".
+	// Returns an error if the key already exists for the organization.
+	Create(ctx context.Context, key string, orgID string, requestPath string) error
+
+	// Complete marks an idempotency record as completed and stores the response.
+	Complete(ctx context.Context, key string, orgID string, statusCode int, body []byte) error
+
+	// Fail marks an idempotency record as failed. This allows the key to be
+	// retried on subsequent requests.
+	Fail(ctx context.Context, key string, orgID string) error
+}

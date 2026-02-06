@@ -207,9 +207,171 @@ func (m *MockSecurityService) IsIdentifierBlocked(_ context.Context, identifier 
 	return m.BlockedIdentifiers[identifier]
 }
 
+// --- MockIdempotencyStore ---
+
+// MockIdempotencyStore implements the IdempotencyStore interface for testing.
+// It uses an in-memory map to track idempotency records and allows injecting
+// errors to simulate store failures.
+//
+// Usage:
+//
+//	mock := NewMockIdempotencyStore()
+//	err := mock.Create(ctx, "key_123", "org_456", "/v1/watchpoints")
+//	record, err := mock.Get(ctx, "key_123", "org_456")
+type MockIdempotencyStore struct {
+	// records maps "orgID:key" to IdempotencyRecord.
+	records map[string]*IdempotencyRecord
+
+	// GetErr is the error returned by Get. When set, the result is nil.
+	GetErr error
+
+	// CreateErr is the error returned by Create.
+	CreateErr error
+
+	// CompleteErr is the error returned by Complete.
+	CompleteErr error
+
+	// FailErr is the error returned by Fail.
+	FailErr error
+
+	// mu protects records and call tracking for concurrent access.
+	mu sync.Mutex
+
+	// GetCalls records every Get invocation for assertion purposes.
+	GetCalls []IdempotencyGetCall
+
+	// CreateCalls records every Create invocation for assertion purposes.
+	CreateCalls []IdempotencyCreateCall
+
+	// CompleteCalls records every Complete invocation for assertion purposes.
+	CompleteCalls []IdempotencyCompleteCall
+}
+
+// IdempotencyGetCall records the arguments of a single Get invocation.
+type IdempotencyGetCall struct {
+	Key   string
+	OrgID string
+}
+
+// IdempotencyCreateCall records the arguments of a single Create invocation.
+type IdempotencyCreateCall struct {
+	Key         string
+	OrgID       string
+	RequestPath string
+}
+
+// IdempotencyCompleteCall records the arguments of a single Complete invocation.
+type IdempotencyCompleteCall struct {
+	Key        string
+	OrgID      string
+	StatusCode int
+	Body       []byte
+}
+
+// NewMockIdempotencyStore creates a new MockIdempotencyStore with an initialized map.
+func NewMockIdempotencyStore() *MockIdempotencyStore {
+	return &MockIdempotencyStore{
+		records: make(map[string]*IdempotencyRecord),
+	}
+}
+
+// idempotencyKey generates the composite key for the internal map.
+func idempotencyMapKey(orgID, key string) string {
+	return orgID + ":" + key
+}
+
+// Get implements IdempotencyStore.
+func (m *MockIdempotencyStore) Get(_ context.Context, key string, orgID string) (*IdempotencyRecord, error) {
+	m.mu.Lock()
+	m.GetCalls = append(m.GetCalls, IdempotencyGetCall{Key: key, OrgID: orgID})
+	m.mu.Unlock()
+
+	if m.GetErr != nil {
+		return nil, m.GetErr
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec, ok := m.records[idempotencyMapKey(orgID, key)]
+	if !ok {
+		return nil, nil
+	}
+	// Return a copy to prevent mutation.
+	copy := *rec
+	return &copy, nil
+}
+
+// Create implements IdempotencyStore.
+func (m *MockIdempotencyStore) Create(_ context.Context, key string, orgID string, requestPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.CreateCalls = append(m.CreateCalls, IdempotencyCreateCall{Key: key, OrgID: orgID, RequestPath: requestPath})
+
+	if m.CreateErr != nil {
+		return m.CreateErr
+	}
+
+	mk := idempotencyMapKey(orgID, key)
+	if _, exists := m.records[mk]; exists {
+		return types.NewAppError(types.ErrCodeConflictIdempotency, "idempotency key already exists", nil)
+	}
+
+	m.records[mk] = &IdempotencyRecord{
+		Key:            key,
+		OrganizationID: orgID,
+		Status:         IdempotencyStatusProcessing,
+	}
+	return nil
+}
+
+// Complete implements IdempotencyStore.
+func (m *MockIdempotencyStore) Complete(_ context.Context, key string, orgID string, statusCode int, body []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.CompleteCalls = append(m.CompleteCalls, IdempotencyCompleteCall{
+		Key: key, OrgID: orgID, StatusCode: statusCode, Body: body,
+	})
+
+	if m.CompleteErr != nil {
+		return m.CompleteErr
+	}
+
+	mk := idempotencyMapKey(orgID, key)
+	rec, ok := m.records[mk]
+	if !ok {
+		return types.NewAppError(types.ErrCodeInternalUnexpected, "idempotency key not found", nil)
+	}
+	rec.Status = IdempotencyStatusCompleted
+	rec.ResponseCode = statusCode
+	rec.ResponseBody = make([]byte, len(body))
+	copy(rec.ResponseBody, body)
+	return nil
+}
+
+// Fail implements IdempotencyStore.
+func (m *MockIdempotencyStore) Fail(_ context.Context, key string, orgID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.FailErr != nil {
+		return m.FailErr
+	}
+
+	mk := idempotencyMapKey(orgID, key)
+	rec, ok := m.records[mk]
+	if !ok {
+		return nil
+	}
+	rec.Status = IdempotencyStatusFailed
+	return nil
+}
+
 // Compile-time interface assertions.
 var (
 	_ Authenticator         = (*MockAuthenticator)(nil)
 	_ RateLimitStore        = (*MockRateLimitStore)(nil)
+	_ IdempotencyStore      = (*MockIdempotencyStore)(nil)
 	_ types.SecurityService = (*MockSecurityService)(nil)
 )

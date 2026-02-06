@@ -38,7 +38,9 @@ type Server struct {
 	Validator       *Validator
 	Metrics         MetricsCollector
 	SecurityService types.SecurityService
-	Authenticator   Authenticator // Resolves tokens to Actors; injected for testability.
+	Authenticator    Authenticator    // Resolves tokens to Actors; injected for testability.
+	RateLimitStore   RateLimitStore   // Backing store for rate limiting; injected for testability.
+	IdempotencyStore IdempotencyStore // Backing store for idempotency keys; injected for testability.
 
 	// Internal router
 	router *chi.Mux

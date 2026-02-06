@@ -784,11 +784,11 @@
           "BILL-009"
         ],
         "definition_of_done": "`ResponseCapturer` correctly buffers body. Middleware logic handles hit/miss cases.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T02:08:55.649040+00:00",
+        "completed_at": "2026-02-06T02:18:10.412156+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
