@@ -47,6 +47,14 @@ const (
 	RoleMember UserRole = "member"
 )
 
+// UserStatus represents the account lifecycle state of a user.
+type UserStatus string
+
+const (
+	UserStatusActive  UserStatus = "active"
+	UserStatusInvited UserStatus = "invited"
+)
+
 // PausedReason describes why a WatchPoint was paused.
 type PausedReason string
 

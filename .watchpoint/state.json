@@ -892,11 +892,11 @@
           "USER-005"
         ],
         "definition_of_done": "`AuthService` unit tests verify transaction logic (via mocked TransactionManager). Integration tests verify User DB operations.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T02:49:54.375258+00:00",
+        "completed_at": "2026-02-06T03:01:42.550370+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {

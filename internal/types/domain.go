@@ -113,13 +113,25 @@ type Organization struct {
 
 // User represents a human user within an organization.
 type User struct {
-	ID             string    `json:"id" db:"id"`
-	OrganizationID string    `json:"organization_id" db:"organization_id"`
-	Email          string    `json:"email" db:"email"`
-	PasswordHash   string    `json:"-" db:"password_hash"`
-	Role           UserRole  `json:"role" db:"role"`
-	CreatedAt      time.Time `json:"created_at" db:"created_at"`
-	LastLoginAt    time.Time `json:"last_login_at" db:"last_login_at"`
+	ID             string     `json:"id" db:"id"`
+	OrganizationID string     `json:"organization_id" db:"organization_id"`
+	Email          string     `json:"email" db:"email"`
+	Name           string     `json:"name,omitempty" db:"name"`
+	PasswordHash   string     `json:"-" db:"password_hash"`
+	Role           UserRole   `json:"role" db:"role"`
+	Status         UserStatus `json:"status" db:"status"`
+
+	// OAuth fields (from 02-foundation-db.md Section 6.5)
+	AuthProvider   string `json:"auth_provider,omitempty" db:"auth_provider"`
+	AuthProviderID string `json:"-" db:"auth_provider_id"`
+
+	// Invite fields (from 02-foundation-db.md Section 6.5)
+	InviteTokenHash string     `json:"-" db:"invite_token_hash"`
+	InviteExpiresAt *time.Time `json:"-" db:"invite_expires_at"`
+
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty" db:"last_login_at"`
+	DeletedAt   *time.Time `json:"-" db:"deleted_at"`
 }
 
 // APIKey represents an API key for programmatic access.

@@ -184,6 +184,20 @@ func (s *sessionService) CleanExpiredSessions(ctx context.Context, userID string
 	return s.repo.DeleteExpiredByUser(ctx, userID)
 }
 
+// withRepo returns a copy of the sessionService that uses the given
+// SessionRepo for database operations. This enables the AuthService to
+// create sessions within a transaction by providing a transaction-scoped
+// session repository while reusing the same token generator and config.
+func (s *sessionService) withRepo(repo SessionRepo) *sessionService {
+	return &sessionService{
+		repo:     repo,
+		tokenGen: s.tokenGen,
+		config:   s.config,
+		clock:    s.clock,
+		logger:   s.logger,
+	}
+}
+
 // CryptoTokenGenerator is the production implementation of TokenGenerator
 // using crypto/rand for secure random generation.
 type CryptoTokenGenerator struct {
