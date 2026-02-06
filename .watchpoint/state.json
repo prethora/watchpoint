@@ -871,9 +871,9 @@
           "SEC-001"
         ],
         "definition_of_done": "Repositories pass integration tests against Docker DB. Services pass unit tests with mocked Repos.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
+        "started_at": "2026-02-06T02:35:32.463819+00:00",
         "completed_at": null,
         "satisfaction_iterations": null,
         "skip_reason": null

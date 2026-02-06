@@ -25,11 +25,18 @@ const (
 	ErrCodeValidationMaxConditions     ErrorCode = "validation_too_many_conditions"
 
 	// Auth (401)
-	ErrCodeAuthTokenMissing   ErrorCode = "auth_token_missing"
-	ErrCodeAuthTokenInvalid   ErrorCode = "auth_token_invalid"
-	ErrCodeAuthTokenExpired   ErrorCode = "auth_token_expired"
-	ErrCodeAuthTokenRevoked   ErrorCode = "auth_token_revoked"
-	ErrCodeAuthSessionExpired ErrorCode = "auth_session_expired"
+	ErrCodeAuthTokenMissing      ErrorCode = "auth_token_missing"
+	ErrCodeAuthTokenInvalid      ErrorCode = "auth_token_invalid"
+	ErrCodeAuthTokenExpired      ErrorCode = "auth_token_expired"
+	ErrCodeAuthTokenRevoked      ErrorCode = "auth_token_revoked"
+	ErrCodeAuthSessionExpired    ErrorCode = "auth_session_expired"
+	ErrCodeAuthInvalidCreds      ErrorCode = "auth_invalid_credentials"
+	ErrCodeAuthUserNotFound      ErrorCode = "auth_user_not_found"
+	ErrCodeAuthLocked            ErrorCode = "auth_account_locked"
+	ErrCodeAuthAccountNotActive  ErrorCode = "auth_account_not_active"
+	ErrCodeAuthEmailNotVerified  ErrorCode = "auth_email_not_verified"
+	ErrCodeAuthOrgDeleted        ErrorCode = "auth_organization_deleted"
+	ErrCodeAuthProviderMismatch  ErrorCode = "auth_provider_mismatch"
 
 	// Permission (403)
 	ErrCodePermissionScope      ErrorCode = "permission_scope_insufficient"
@@ -77,6 +84,14 @@ func (c ErrorCode) HTTPStatus() int {
 	switch {
 	case strings.HasPrefix(s, "validation_"):
 		return http.StatusBadRequest // 400
+	case s == string(ErrCodeAuthLocked):
+		return http.StatusTooManyRequests // 429
+	case s == string(ErrCodeAuthAccountNotActive),
+		s == string(ErrCodeAuthEmailNotVerified),
+		s == string(ErrCodeAuthOrgDeleted):
+		return http.StatusForbidden // 403
+	case s == string(ErrCodeAuthProviderMismatch):
+		return http.StatusConflict // 409
 	case strings.HasPrefix(s, "auth_"):
 		return http.StatusUnauthorized // 401
 	case strings.HasPrefix(s, "permission_"):

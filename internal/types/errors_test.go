@@ -237,6 +237,15 @@ func TestErrorCodeHTTPStatusMapping(t *testing.T) {
 		{ErrCodeAuthTokenExpired, http.StatusUnauthorized},
 		{ErrCodeAuthTokenRevoked, http.StatusUnauthorized},
 		{ErrCodeAuthSessionExpired, http.StatusUnauthorized},
+		{ErrCodeAuthInvalidCreds, http.StatusUnauthorized},
+		{ErrCodeAuthUserNotFound, http.StatusUnauthorized},
+
+		// Auth overrides (non-401)
+		{ErrCodeAuthLocked, http.StatusTooManyRequests},
+		{ErrCodeAuthAccountNotActive, http.StatusForbidden},
+		{ErrCodeAuthEmailNotVerified, http.StatusForbidden},
+		{ErrCodeAuthOrgDeleted, http.StatusForbidden},
+		{ErrCodeAuthProviderMismatch, http.StatusConflict},
 
 		// Permission (403)
 		{ErrCodePermissionScope, http.StatusForbidden},
@@ -320,6 +329,13 @@ func TestAllErrorCodeStringValues(t *testing.T) {
 		{ErrCodeAuthTokenExpired, "auth_token_expired"},
 		{ErrCodeAuthTokenRevoked, "auth_token_revoked"},
 		{ErrCodeAuthSessionExpired, "auth_session_expired"},
+		{ErrCodeAuthInvalidCreds, "auth_invalid_credentials"},
+		{ErrCodeAuthUserNotFound, "auth_user_not_found"},
+		{ErrCodeAuthLocked, "auth_account_locked"},
+		{ErrCodeAuthAccountNotActive, "auth_account_not_active"},
+		{ErrCodeAuthEmailNotVerified, "auth_email_not_verified"},
+		{ErrCodeAuthOrgDeleted, "auth_organization_deleted"},
+		{ErrCodeAuthProviderMismatch, "auth_provider_mismatch"},
 
 		// Permission
 		{ErrCodePermissionScope, "permission_scope_insufficient"},
