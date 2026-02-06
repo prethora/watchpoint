@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"watchpoint/internal/api/handlers"
+	"watchpoint/internal/billing"
 	"watchpoint/internal/config"
 	"watchpoint/internal/core"
 	"watchpoint/internal/types"
@@ -115,6 +116,50 @@ func run() error {
 		logger,
 	)
 	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, billingHandler.RegisterRoutes)
+
+	// Wire the Organization + User handlers with stub services.
+	// When real repository and service implementations are available, they will
+	// replace these stubs.
+	stubOrgRepo := &stubOrgHandlerRepo{}
+	stubOrgWPRepo := &stubOrgWatchPointRepo{}
+	stubOrgNotifRepo := &stubOrgNotificationRepo{}
+	stubOrgAuditRepo := &stubOrgAuditRepo{}
+	stubOrgUserRepo := &stubOrgUserRepo{}
+	stubOrgBillingSvc := &stubOrgBillingServiceImpl{}
+	planRegistry := billing.NewStaticPlanRegistry()
+
+	orgHandler := handlers.NewOrganizationHandler(
+		stubOrgRepo,
+		stubOrgWPRepo,
+		stubOrgNotifRepo,
+		stubOrgAuditRepo,
+		stubOrgUserRepo,
+		planRegistry,
+		stubOrgBillingSvc,
+		srv.Validator,
+		logger,
+	)
+
+	stubUserRepo := &stubUserHandlerRepo{}
+	stubUserSessionRepo := &stubUserSessionRepo{}
+	stubEmailSvc := &stubEmailServiceImpl{}
+
+	userHandler := handlers.NewUserHandler(
+		stubUserRepo,
+		stubUserSessionRepo,
+		stubEmailSvc,
+		stubAudit,
+		srv.Validator,
+		logger,
+	)
+
+	// Wire the API Key handler (already exists from previous task).
+	stubAPIKeyRepo := &stubAPIKeyHandlerRepo{}
+	apiKeyHandler := handlers.NewAPIKeyHandler(stubAPIKeyRepo, stubAudit, logger)
+
+	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, func(r chi.Router) {
+		orgHandler.RegisterRoutes(r, userHandler, apiKeyHandler)
+	})
 
 	// Mount all routes (middleware chain + versioned endpoints + health).
 	srv.MountRoutes()
@@ -375,6 +420,109 @@ func (s *stubAuditLoggerService) Log(_ context.Context, _ types.AuditEvent) erro
 	return nil
 }
 
+// =============================================================================
+// Stub Dependencies for Organization & User Handlers
+// =============================================================================
+
+// stubOrgHandlerRepo implements handlers.OrgRepo with stub responses.
+type stubOrgHandlerRepo struct{}
+
+func (s *stubOrgHandlerRepo) GetByID(_ context.Context, _ string) (*types.Organization, error) {
+	return nil, types.NewAppError(types.ErrCodeNotFoundOrg, "organization service not configured", nil)
+}
+func (s *stubOrgHandlerRepo) Create(_ context.Context, _ *types.Organization) error { return nil }
+func (s *stubOrgHandlerRepo) Update(_ context.Context, _ *types.Organization) error { return nil }
+func (s *stubOrgHandlerRepo) Delete(_ context.Context, _ string) error              { return nil }
+
+// stubOrgWatchPointRepo implements handlers.OrgWatchPointRepo with no-op.
+type stubOrgWatchPointRepo struct{}
+
+func (s *stubOrgWatchPointRepo) PauseAllByOrgID(_ context.Context, _ string) error { return nil }
+
+// stubOrgNotificationRepo implements handlers.OrgNotificationRepo with empty results.
+type stubOrgNotificationRepo struct{}
+
+func (s *stubOrgNotificationRepo) List(_ context.Context, _ types.NotificationFilter) ([]types.NotificationHistoryItem, types.PageInfo, error) {
+	return nil, types.PageInfo{}, nil
+}
+
+// stubOrgAuditRepo implements handlers.OrgAuditRepo with no-op behavior.
+type stubOrgAuditRepo struct{}
+
+func (s *stubOrgAuditRepo) Log(_ context.Context, _ *types.AuditEvent) error { return nil }
+func (s *stubOrgAuditRepo) List(_ context.Context, _ types.AuditQueryFilters) ([]*types.AuditEvent, types.PageInfo, error) {
+	return nil, types.PageInfo{}, nil
+}
+
+// stubOrgUserRepo implements handlers.OrgUserRepo with no-op behavior.
+type stubOrgUserRepo struct{}
+
+func (s *stubOrgUserRepo) CreateWithProvider(_ context.Context, _ *types.User) error { return nil }
+
+// stubOrgBillingServiceImpl implements handlers.OrgBillingService with no-op behavior.
+type stubOrgBillingServiceImpl struct{}
+
+func (s *stubOrgBillingServiceImpl) EnsureCustomer(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubOrgBillingServiceImpl) CancelSubscription(_ context.Context, _ string) error {
+	return nil
+}
+
+// stubUserHandlerRepo implements handlers.UserRepo with stub responses.
+type stubUserHandlerRepo struct{}
+
+func (s *stubUserHandlerRepo) GetByID(_ context.Context, _, _ string) (*types.User, error) {
+	return nil, types.NewAppError(types.ErrCodeNotFoundUser, "user service not configured", nil)
+}
+func (s *stubUserHandlerRepo) GetByEmail(_ context.Context, _ string) (*types.User, error) {
+	return nil, types.NewAppError(types.ErrCodeNotFoundUser, "user service not configured", nil)
+}
+func (s *stubUserHandlerRepo) Update(_ context.Context, _ *types.User) error { return nil }
+func (s *stubUserHandlerRepo) Delete(_ context.Context, _, _ string) error   { return nil }
+func (s *stubUserHandlerRepo) CountOwners(_ context.Context, _ string) (int, error) {
+	return 1, nil
+}
+func (s *stubUserHandlerRepo) CreateInvited(_ context.Context, _ *types.User, _ string, _ time.Time) error {
+	return nil
+}
+func (s *stubUserHandlerRepo) UpdateInviteToken(_ context.Context, _, _ string, _ time.Time) error {
+	return nil
+}
+func (s *stubUserHandlerRepo) ListByOrg(_ context.Context, _ string, _ *types.UserRole, _ int, _ string) ([]*types.User, error) {
+	return nil, nil
+}
+
+// stubUserSessionRepo implements handlers.UserSessionRepo with no-op behavior.
+type stubUserSessionRepo struct{}
+
+func (s *stubUserSessionRepo) DeleteByUser(_ context.Context, _ string) error { return nil }
+
+// stubEmailServiceImpl implements handlers.UserEmailService with no-op behavior.
+type stubEmailServiceImpl struct{}
+
+func (s *stubEmailServiceImpl) SendInvite(_ context.Context, _, _ string, _ types.UserRole) error {
+	return nil
+}
+
+// stubAPIKeyHandlerRepo implements handlers.APIKeyRepo with stub responses.
+type stubAPIKeyHandlerRepo struct{}
+
+func (s *stubAPIKeyHandlerRepo) List(_ context.Context, _ string, _ handlers.APIKeyListParams) ([]*types.APIKey, error) {
+	return nil, nil
+}
+func (s *stubAPIKeyHandlerRepo) Create(_ context.Context, _ *types.APIKey) error { return nil }
+func (s *stubAPIKeyHandlerRepo) GetByID(_ context.Context, _, _ string) (*types.APIKey, error) {
+	return nil, types.NewAppError(types.ErrCodeNotFoundAPIKey, "not found", nil)
+}
+func (s *stubAPIKeyHandlerRepo) Delete(_ context.Context, _, _ string) error { return nil }
+func (s *stubAPIKeyHandlerRepo) Rotate(_ context.Context, _, _ string, _ *types.APIKey, _ time.Time) error {
+	return nil
+}
+func (s *stubAPIKeyHandlerRepo) CountRecentByUser(_ context.Context, _ string, _ time.Time) (int, error) {
+	return 0, nil
+}
+
 // Compile-time interface assertions to ensure stubs satisfy their contracts.
 var (
 	_ types.RepositoryRegistry  = (*stubRepositoryRegistry)(nil)
@@ -389,4 +537,16 @@ var (
 	_ handlers.OrgBillingReader = (*stubOrgBillingReader)(nil)
 	_ handlers.UsageReporter    = (*stubUsageReporterService)(nil)
 	_ handlers.AuditLogger      = (*stubAuditLoggerService)(nil)
+
+	// Organization & User handler stubs
+	_ handlers.OrgRepo              = (*stubOrgHandlerRepo)(nil)
+	_ handlers.OrgWatchPointRepo    = (*stubOrgWatchPointRepo)(nil)
+	_ handlers.OrgNotificationRepo  = (*stubOrgNotificationRepo)(nil)
+	_ handlers.OrgAuditRepo         = (*stubOrgAuditRepo)(nil)
+	_ handlers.OrgUserRepo          = (*stubOrgUserRepo)(nil)
+	_ handlers.OrgBillingService    = (*stubOrgBillingServiceImpl)(nil)
+	_ handlers.UserRepo             = (*stubUserHandlerRepo)(nil)
+	_ handlers.UserSessionRepo      = (*stubUserSessionRepo)(nil)
+	_ handlers.UserEmailService     = (*stubEmailServiceImpl)(nil)
+	_ handlers.APIKeyRepo           = (*stubAPIKeyHandlerRepo)(nil)
 )

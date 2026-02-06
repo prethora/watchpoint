@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -388,6 +390,126 @@ func (r *UserRepository) Delete(ctx context.Context, id string, orgID string) er
 		return types.NewAppError(types.ErrCodeNotFoundUser, "user not found", nil)
 	}
 	return nil
+}
+
+// ListByOrg retrieves users for an organization with optional role filtering
+// and cursor-based pagination. Results are ordered by created_at DESC.
+// Returns limit+1 rows for cursor detection by the handler.
+//
+// Used by GET /v1/users (INFO-002 flow).
+func (r *UserRepository) ListByOrg(ctx context.Context, orgID string, role *types.UserRole, limit int, cursor string) ([]*types.User, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	// Build dynamic query.
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	conditions = append(conditions, fmt.Sprintf("u.organization_id = $%d", argIdx))
+	args = append(args, orgID)
+	argIdx++
+
+	conditions = append(conditions, "u.deleted_at IS NULL")
+
+	if role != nil {
+		conditions = append(conditions, fmt.Sprintf("u.role = $%d", argIdx))
+		args = append(args, string(*role))
+		argIdx++
+	}
+
+	if cursor != "" {
+		cursorTime, err := time.Parse(time.RFC3339Nano, cursor)
+		if err != nil {
+			return nil, types.NewAppError(
+				types.ErrCodeValidationMissingField,
+				"invalid cursor format; expected RFC3339 timestamp",
+				err,
+			)
+		}
+		conditions = append(conditions, fmt.Sprintf("u.created_at < $%d", argIdx))
+		args = append(args, cursorTime)
+		argIdx++
+	}
+
+	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM users u %s ORDER BY u.created_at DESC LIMIT $%d`,
+		userColumns,
+		whereClause,
+		argIdx,
+	)
+	args = append(args, limit+1) // +1 for cursor detection
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, types.NewAppError(types.ErrCodeInternalDB, "failed to list users by organization", err)
+	}
+	defer rows.Close()
+
+	var results []*types.User
+	for rows.Next() {
+		u, scanErr := scanUserFromRows(rows)
+		if scanErr != nil {
+			return nil, types.NewAppError(types.ErrCodeInternalDB, "failed to scan user row", scanErr)
+		}
+		results = append(results, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, types.NewAppError(types.ErrCodeInternalDB, "error iterating user rows", err)
+	}
+
+	return results, nil
+}
+
+// scanUserFromRows scans a single user row from pgx.Rows into a types.User struct.
+// Uses the same column order as userColumns.
+func scanUserFromRows(rows pgx.Rows) (*types.User, error) {
+	var u types.User
+	var (
+		name            *string
+		passwordHash    *string
+		authProvider    *string
+		authProviderID  *string
+		inviteTokenHash *string
+	)
+	err := rows.Scan(
+		&u.ID,
+		&u.OrganizationID,
+		&u.Email,
+		&name,
+		&passwordHash,
+		&u.Role,
+		&u.Status,
+		&authProvider,
+		&authProviderID,
+		&inviteTokenHash,
+		&u.InviteExpiresAt,
+		&u.CreatedAt,
+		&u.LastLoginAt,
+		&u.DeletedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if name != nil {
+		u.Name = *name
+	}
+	if passwordHash != nil {
+		u.PasswordHash = *passwordHash
+	}
+	if authProvider != nil {
+		u.AuthProvider = *authProvider
+	}
+	if authProviderID != nil {
+		u.AuthProviderID = *authProviderID
+	}
+	if inviteTokenHash != nil {
+		u.InviteTokenHash = *inviteTokenHash
+	}
+	return &u, nil
 }
 
 // UpdateInviteToken updates only the invite token hash and expiry for an

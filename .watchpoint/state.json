@@ -1057,11 +1057,11 @@
           "OBS-011"
         ],
         "definition_of_done": "Handlers pass unit tests. Invite flow calls EmailService mock.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T04:00:57.018063+00:00",
+        "completed_at": "2026-02-06T04:16:11.483841+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
