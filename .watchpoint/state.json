@@ -371,11 +371,11 @@
           "USER-001"
         ],
         "definition_of_done": "Files exist. SQL syntax is valid Postgres 15.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T00:16:13.243131+00:00",
+        "completed_at": "2026-02-06T00:18:24.839313+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
