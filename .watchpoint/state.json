@@ -1574,11 +1574,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Script runs against local MinIO and creates accessible objects.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T11:59:05.471444+00:00",
+        "completed_at": "2026-02-06T12:18:45.307660+00:00",
+        "satisfaction_iterations": 3,
         "skip_reason": null
       },
       {
