@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -105,6 +106,35 @@ func (r *ForecastRunRepository) GetLatestServing(ctx context.Context, model type
 			return nil, nil
 		}
 		return nil, types.NewAppError(types.ErrCodeInternalDB, "failed to query latest serving forecast run", err)
+	}
+	return run, nil
+}
+
+// GetByTimestamp retrieves a forecast run by model and run_timestamp.
+// This is the critical query for the Batcher's Phantom Run check (IMPL-003).
+// The Batcher uses this to verify that a forecast run was legitimately created
+// by the DataPoller before processing S3 events.
+//
+// SQL: SELECT * FROM forecast_runs WHERE model=$1 AND run_timestamp=$2
+//
+// Returns nil (not an error) when no matching run exists (Phantom Run case).
+func (r *ForecastRunRepository) GetByTimestamp(ctx context.Context, model types.ForecastType, ts time.Time) (*types.ForecastRun, error) {
+	row := r.db.QueryRow(ctx,
+		`SELECT id, model, run_timestamp, source_data_timestamp, storage_path,
+		        status, external_id, retry_count, failure_reason,
+		        inference_duration_ms, created_at
+		 FROM forecast_runs
+		 WHERE model = $1 AND run_timestamp = $2`,
+		string(model),
+		ts,
+	)
+
+	run, err := scanForecastRun(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, types.NewAppError(types.ErrCodeInternalDB, "failed to query forecast run by timestamp", err)
 	}
 	return run, nil
 }
