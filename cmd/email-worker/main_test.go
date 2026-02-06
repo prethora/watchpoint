@@ -1,0 +1,498 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-lambda-go/events"
+
+	"watchpoint/internal/notifications/core"
+	"watchpoint/internal/types"
+)
+
+// --- Mock Types ---
+
+// mockDeliveryManager implements core.DeliveryManager for tests.
+type mockDeliveryManager struct {
+	ensureDeliveryCalls   int
+	recordAttemptCalls    int
+	markSuccessCalls      int
+	markFailureCalls      int
+	markSkippedCalls      int
+	markDeferredCalls     int
+	checkAggregateCalls   int
+	resetStateCalls       int
+	cancelDeferredCalls   int
+	lastDeliveryID        string
+	lastProviderMsgID     string
+	lastFailureReason     string
+	ensureCreated         bool
+	markFailureShouldRetry bool
+	aggregateAllFailed    bool
+}
+
+func (m *mockDeliveryManager) EnsureDeliveryExists(_ context.Context, _ string, _ types.ChannelType, _ int) (string, bool, error) {
+	m.ensureDeliveryCalls++
+	return "del_test_email_0", m.ensureCreated, nil
+}
+
+func (m *mockDeliveryManager) RecordAttempt(_ context.Context, _ string) error {
+	m.recordAttemptCalls++
+	return nil
+}
+
+func (m *mockDeliveryManager) MarkSuccess(_ context.Context, deliveryID string, providerMsgID string) error {
+	m.markSuccessCalls++
+	m.lastDeliveryID = deliveryID
+	m.lastProviderMsgID = providerMsgID
+	return nil
+}
+
+func (m *mockDeliveryManager) MarkFailure(_ context.Context, deliveryID string, reason string) (bool, error) {
+	m.markFailureCalls++
+	m.lastDeliveryID = deliveryID
+	m.lastFailureReason = reason
+	return m.markFailureShouldRetry, nil
+}
+
+func (m *mockDeliveryManager) MarkSkipped(_ context.Context, deliveryID string, _ string) error {
+	m.markSkippedCalls++
+	m.lastDeliveryID = deliveryID
+	return nil
+}
+
+func (m *mockDeliveryManager) MarkDeferred(_ context.Context, _ string, _ time.Time) error {
+	m.markDeferredCalls++
+	return nil
+}
+
+func (m *mockDeliveryManager) CheckAggregateFailure(_ context.Context, _ string) (bool, error) {
+	m.checkAggregateCalls++
+	return m.aggregateAllFailed, nil
+}
+
+func (m *mockDeliveryManager) ResetNotificationState(_ context.Context, _ string) error {
+	m.resetStateCalls++
+	return nil
+}
+
+func (m *mockDeliveryManager) CancelDeferred(_ context.Context, _ string) error {
+	m.cancelDeferredCalls++
+	return nil
+}
+
+// mockNotificationChannel implements types.NotificationChannel for tests.
+type mockNotificationChannel struct {
+	deliverResult *types.DeliveryResult
+	deliverError  error
+	formatPayload []byte
+	formatError   error
+	shouldRetryFn func(error) bool
+}
+
+func (m *mockNotificationChannel) Type() types.ChannelType { return types.ChannelEmail }
+
+func (m *mockNotificationChannel) ValidateConfig(_ map[string]any) error { return nil }
+
+func (m *mockNotificationChannel) Format(_ context.Context, _ *types.Notification, _ map[string]any) ([]byte, error) {
+	if m.formatError != nil {
+		return nil, m.formatError
+	}
+	if m.formatPayload != nil {
+		return m.formatPayload, nil
+	}
+	return []byte(`{"test":"payload"}`), nil
+}
+
+func (m *mockNotificationChannel) Deliver(_ context.Context, _ []byte, _ string) (*types.DeliveryResult, error) {
+	return m.deliverResult, m.deliverError
+}
+
+func (m *mockNotificationChannel) ShouldRetry(err error) bool {
+	if m.shouldRetryFn != nil {
+		return m.shouldRetryFn(err)
+	}
+	return err != nil
+}
+
+// mockMetrics implements core.NotificationMetrics for tests.
+type mockMetrics struct {
+	deliveryCalls int
+	latencyCalls  int
+	queueLagCalls int
+}
+
+func (m *mockMetrics) RecordDelivery(_ context.Context, _ types.ChannelType, _ core.MetricResult) {
+	m.deliveryCalls++
+}
+func (m *mockMetrics) RecordLatency(_ context.Context, _ types.ChannelType, _ time.Duration) {
+	m.latencyCalls++
+}
+func (m *mockMetrics) RecordQueueLag(_ context.Context, _ time.Duration) {
+	m.queueLagCalls++
+}
+
+// testLogger implements types.Logger for tests.
+type testLogger struct{}
+
+func (l *testLogger) Info(_ string, _ ...any)         {}
+func (l *testLogger) Error(_ string, _ ...any)        {}
+func (l *testLogger) Warn(_ string, _ ...any)         {}
+func (l *testLogger) With(_ ...any) types.Logger      { return l }
+
+// --- Helper Functions ---
+
+func buildSQSEvent(messages ...types.NotificationMessage) events.SQSEvent {
+	records := make([]events.SQSMessage, len(messages))
+	for i, msg := range messages {
+		body, _ := json.Marshal(msg)
+		records[i] = events.SQSMessage{
+			MessageId: "msg-" + msg.NotificationID,
+			Body:      string(body),
+			Attributes: map[string]string{
+				"SentTimestamp": "1706745600000",
+			},
+		}
+	}
+	return events.SQSEvent{Records: records}
+}
+
+func testNotificationMessage() types.NotificationMessage {
+	return types.NotificationMessage{
+		NotificationID: "notif-001",
+		WatchPointID:   "wp-001",
+		OrganizationID: "org-001",
+		EventType:      types.EventThresholdCrossed,
+		Urgency:        types.UrgencyWarning,
+		TestMode:       false,
+		RetryCount:     0,
+		TraceID:        "trace-001",
+		Payload: map[string]interface{}{
+			"channels": []map[string]interface{}{
+				{
+					"id":      "ch-email-001",
+					"type":    "email",
+					"config":  map[string]interface{}{"address": "user@example.com"},
+					"enabled": true,
+				},
+			},
+		},
+	}
+}
+
+// --- Tests ---
+
+func TestSlogAdapter_ImplementsLogger(t *testing.T) {
+	var logger types.Logger = &slogAdapter{logger: nil}
+	if logger == nil {
+		t.Fatal("slogAdapter should not be nil")
+	}
+}
+
+func TestExtractChannels_WithEmailChannels(t *testing.T) {
+	payload := map[string]interface{}{
+		"channels": []map[string]interface{}{
+			{
+				"id":      "ch-001",
+				"type":    "email",
+				"config":  map[string]interface{}{"address": "user@example.com"},
+				"enabled": true,
+			},
+			{
+				"id":      "ch-002",
+				"type":    "webhook",
+				"config":  map[string]interface{}{"url": "https://hooks.example.com/test"},
+				"enabled": true,
+			},
+		},
+	}
+
+	channels := extractChannels(payload)
+	if len(channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(channels))
+	}
+	if channels[0].Type != types.ChannelEmail {
+		t.Errorf("expected first channel type 'email', got %q", channels[0].Type)
+	}
+	if channels[1].Type != types.ChannelWebhook {
+		t.Errorf("expected second channel type 'webhook', got %q", channels[1].Type)
+	}
+}
+
+func TestExtractChannels_NoChannelsKey(t *testing.T) {
+	payload := map[string]interface{}{"other": "data"}
+	channels := extractChannels(payload)
+	if channels != nil {
+		t.Errorf("expected nil channels, got %v", channels)
+	}
+}
+
+func TestExtractChannels_NilPayload(t *testing.T) {
+	channels := extractChannels(nil)
+	if channels != nil {
+		t.Errorf("expected nil channels, got %v", channels)
+	}
+}
+
+func TestNotificationFromMessage(t *testing.T) {
+	msg := testNotificationMessage()
+	n := notificationFromMessage(msg)
+
+	if n.ID != msg.NotificationID {
+		t.Errorf("expected ID %q, got %q", msg.NotificationID, n.ID)
+	}
+	if n.WatchPointID != msg.WatchPointID {
+		t.Errorf("expected WatchPointID %q, got %q", msg.WatchPointID, n.WatchPointID)
+	}
+	if n.OrganizationID != msg.OrganizationID {
+		t.Errorf("expected OrganizationID %q, got %q", msg.OrganizationID, n.OrganizationID)
+	}
+	if n.EventType != msg.EventType {
+		t.Errorf("expected EventType %q, got %q", msg.EventType, n.EventType)
+	}
+	if n.Urgency != msg.Urgency {
+		t.Errorf("expected Urgency %q, got %q", msg.Urgency, n.Urgency)
+	}
+	if n.TestMode != msg.TestMode {
+		t.Errorf("expected TestMode %v, got %v", msg.TestMode, n.TestMode)
+	}
+}
+
+func TestParseMillisTimestamp(t *testing.T) {
+	ts, err := parseMillisTimestamp("1706745600000")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.UnixMilli(1706745600000)
+	if !ts.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, ts)
+	}
+}
+
+func TestParseMillisTimestamp_Invalid(t *testing.T) {
+	_, err := parseMillisTimestamp("not-a-number")
+	if err == nil {
+		t.Error("expected error for invalid timestamp")
+	}
+}
+
+func TestHandler_HandleMalformedMessage(t *testing.T) {
+	handler := &Handler{
+		channel:     &mockNotificationChannel{},
+		deliveryMgr: &mockDeliveryManager{ensureCreated: true},
+		metrics:     &mockMetrics{},
+		retryPolicy: core.EmailRetryPolicy,
+		logger:      &testLogger{},
+	}
+
+	sqsEvent := events.SQSEvent{
+		Records: []events.SQSMessage{
+			{
+				MessageId: "msg-bad",
+				Body:      "{{not valid json}}",
+				Attributes: map[string]string{
+					"SentTimestamp": "1706745600000",
+				},
+			},
+		},
+	}
+
+	resp, err := handler.Handle(context.Background(), sqsEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Malformed messages should be ACKed (not retried) to prevent poison pill loops.
+	if len(resp.BatchItemFailures) != 0 {
+		t.Errorf("expected 0 batch item failures for malformed message, got %d", len(resp.BatchItemFailures))
+	}
+}
+
+func TestHandler_HandleSuccessfulDelivery(t *testing.T) {
+	dm := &mockDeliveryManager{ensureCreated: true}
+	channel := &mockNotificationChannel{
+		deliverResult: &types.DeliveryResult{
+			Status:            types.DeliveryStatusSent,
+			ProviderMessageID: "sg-msg-123",
+		},
+	}
+	metrics := &mockMetrics{}
+
+	handler := &Handler{
+		channel:     channel,
+		deliveryMgr: dm,
+		metrics:     metrics,
+		retryPolicy: core.EmailRetryPolicy,
+		logger:      &testLogger{},
+	}
+
+	msg := testNotificationMessage()
+	sqsEvent := buildSQSEvent(msg)
+
+	resp, err := handler.Handle(context.Background(), sqsEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.BatchItemFailures) != 0 {
+		t.Errorf("expected 0 failures, got %d", len(resp.BatchItemFailures))
+	}
+
+	if dm.ensureDeliveryCalls != 1 {
+		t.Errorf("expected 1 EnsureDeliveryExists call, got %d", dm.ensureDeliveryCalls)
+	}
+	if dm.recordAttemptCalls != 1 {
+		t.Errorf("expected 1 RecordAttempt call, got %d", dm.recordAttemptCalls)
+	}
+	if dm.markSuccessCalls != 1 {
+		t.Errorf("expected 1 MarkSuccess call, got %d", dm.markSuccessCalls)
+	}
+	if dm.lastProviderMsgID != "sg-msg-123" {
+		t.Errorf("expected provider message ID 'sg-msg-123', got %q", dm.lastProviderMsgID)
+	}
+}
+
+func TestHandler_HandleTestModeSkip(t *testing.T) {
+	dm := &mockDeliveryManager{ensureCreated: true}
+	channel := &mockNotificationChannel{
+		deliverResult: &types.DeliveryResult{
+			Status:            types.DeliveryStatusSkipped,
+			ProviderMessageID: "test-simulated",
+		},
+	}
+
+	handler := &Handler{
+		channel:     channel,
+		deliveryMgr: dm,
+		metrics:     &mockMetrics{},
+		retryPolicy: core.EmailRetryPolicy,
+		logger:      &testLogger{},
+	}
+
+	msg := testNotificationMessage()
+	msg.TestMode = true
+	sqsEvent := buildSQSEvent(msg)
+
+	resp, err := handler.Handle(context.Background(), sqsEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.BatchItemFailures) != 0 {
+		t.Errorf("expected 0 failures, got %d", len(resp.BatchItemFailures))
+	}
+	if dm.markSkippedCalls != 1 {
+		t.Errorf("expected 1 MarkSkipped call, got %d", dm.markSkippedCalls)
+	}
+}
+
+func TestHandler_HandleBouncedTerminalFailure(t *testing.T) {
+	dm := &mockDeliveryManager{ensureCreated: true, aggregateAllFailed: false}
+	channel := &mockNotificationChannel{
+		deliverResult: &types.DeliveryResult{
+			Status:        types.DeliveryStatusBounced,
+			FailureReason: "address_blocked",
+			Retryable:     false,
+		},
+	}
+
+	handler := &Handler{
+		channel:     channel,
+		deliveryMgr: dm,
+		metrics:     &mockMetrics{},
+		retryPolicy: core.EmailRetryPolicy,
+		logger:      &testLogger{},
+	}
+
+	msg := testNotificationMessage()
+	sqsEvent := buildSQSEvent(msg)
+
+	resp, err := handler.Handle(context.Background(), sqsEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.BatchItemFailures) != 0 {
+		t.Errorf("expected 0 failures, got %d", len(resp.BatchItemFailures))
+	}
+	if dm.markFailureCalls != 1 {
+		t.Errorf("expected 1 MarkFailure call, got %d", dm.markFailureCalls)
+	}
+	if dm.checkAggregateCalls != 1 {
+		t.Errorf("expected 1 CheckAggregateFailure call, got %d", dm.checkAggregateCalls)
+	}
+	// Not all channels failed, so no reset.
+	if dm.resetStateCalls != 0 {
+		t.Errorf("expected 0 ResetNotificationState calls, got %d", dm.resetStateCalls)
+	}
+}
+
+func TestHandler_AggregateFailureTriggers_Reset(t *testing.T) {
+	dm := &mockDeliveryManager{ensureCreated: true, aggregateAllFailed: true}
+	channel := &mockNotificationChannel{
+		deliverResult: &types.DeliveryResult{
+			Status:        types.DeliveryStatusBounced,
+			FailureReason: "address_blocked",
+			Retryable:     false,
+		},
+	}
+
+	handler := &Handler{
+		channel:     channel,
+		deliveryMgr: dm,
+		metrics:     &mockMetrics{},
+		retryPolicy: core.EmailRetryPolicy,
+		logger:      &testLogger{},
+	}
+
+	msg := testNotificationMessage()
+	sqsEvent := buildSQSEvent(msg)
+
+	resp, err := handler.Handle(context.Background(), sqsEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.BatchItemFailures) != 0 {
+		t.Errorf("expected 0 failures, got %d", len(resp.BatchItemFailures))
+	}
+	if dm.resetStateCalls != 1 {
+		t.Errorf("expected 1 ResetNotificationState call, got %d", dm.resetStateCalls)
+	}
+}
+
+func TestHandler_NoEmailChannels(t *testing.T) {
+	dm := &mockDeliveryManager{ensureCreated: true}
+	handler := &Handler{
+		channel:     &mockNotificationChannel{},
+		deliveryMgr: dm,
+		metrics:     &mockMetrics{},
+		retryPolicy: core.EmailRetryPolicy,
+		logger:      &testLogger{},
+	}
+
+	msg := types.NotificationMessage{
+		NotificationID: "notif-001",
+		Payload: map[string]interface{}{
+			"channels": []map[string]interface{}{
+				{
+					"id":      "ch-wh-001",
+					"type":    "webhook",
+					"config":  map[string]interface{}{"url": "https://hooks.example.com"},
+					"enabled": true,
+				},
+			},
+		},
+	}
+	sqsEvent := buildSQSEvent(msg)
+
+	resp, err := handler.Handle(context.Background(), sqsEvent)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.BatchItemFailures) != 0 {
+		t.Errorf("expected 0 failures, got %d", len(resp.BatchItemFailures))
+	}
+	// No email channels found, so no delivery attempts.
+	if dm.ensureDeliveryCalls != 0 {
+		t.Errorf("expected 0 EnsureDeliveryExists calls, got %d", dm.ensureDeliveryCalls)
+	}
+}

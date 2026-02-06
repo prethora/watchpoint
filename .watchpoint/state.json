@@ -1988,11 +1988,11 @@
           "NOTIF-001"
         ],
         "definition_of_done": "Both binaries compile. ",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T16:31:55.569152+00:00",
+        "completed_at": "2026-02-06T16:42:59.792247+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
