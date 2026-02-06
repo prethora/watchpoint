@@ -238,6 +238,63 @@ func TestIsTestKey(t *testing.T) {
 	}
 }
 
+func TestWithSessionCSRFToken_GetSessionCSRFToken(t *testing.T) {
+	t.Run("round-trip stores and retrieves CSRF token", func(t *testing.T) {
+		token := "csrf_abc123def456ghi789jkl012mno"
+		ctx := WithSessionCSRFToken(context.Background(), token)
+		got, ok := GetSessionCSRFToken(ctx)
+		if !ok {
+			t.Fatal("expected ok to be true")
+		}
+		if got != token {
+			t.Errorf("got %q, want %q", got, token)
+		}
+	})
+
+	t.Run("returns false when no CSRF token in context", func(t *testing.T) {
+		_, ok := GetSessionCSRFToken(context.Background())
+		if ok {
+			t.Error("expected ok to be false for empty context")
+		}
+	})
+
+	t.Run("returns false for empty string token", func(t *testing.T) {
+		ctx := WithSessionCSRFToken(context.Background(), "")
+		_, ok := GetSessionCSRFToken(ctx)
+		if ok {
+			t.Error("expected ok to be false for empty CSRF token")
+		}
+	})
+
+	t.Run("does not interfere with other context values", func(t *testing.T) {
+		actor := Actor{
+			ID:   "user-1",
+			Type: ActorTypeUser,
+		}
+		token := "csrf_token_xyz"
+
+		ctx := context.Background()
+		ctx = WithActor(ctx, actor)
+		ctx = WithSessionCSRFToken(ctx, token)
+		ctx = WithRequestID(ctx, "req-123")
+
+		gotActor, ok := GetActor(ctx)
+		if !ok || gotActor.ID != "user-1" {
+			t.Errorf("actor not preserved: ok=%v, ID=%q", ok, gotActor.ID)
+		}
+
+		gotToken, ok := GetSessionCSRFToken(ctx)
+		if !ok || gotToken != token {
+			t.Errorf("CSRF token not preserved: ok=%v, token=%q", ok, gotToken)
+		}
+
+		gotReqID := GetRequestID(ctx)
+		if gotReqID != "req-123" {
+			t.Errorf("request ID not preserved: %q", gotReqID)
+		}
+	})
+}
+
 func TestActorType_Constants(t *testing.T) {
 	// Verify the exact string values match the specification.
 	if ActorTypeUser != "user" {

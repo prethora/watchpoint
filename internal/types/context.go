@@ -27,9 +27,10 @@ type Actor struct {
 type contextKey string
 
 const (
-	actorKey     contextKey = "actor"
-	requestIDKey contextKey = "request_id"
-	loggerKey    contextKey = "logger"
+	actorKey        contextKey = "actor"
+	requestIDKey    contextKey = "request_id"
+	loggerKey       contextKey = "logger"
+	sessionCSRFKey  contextKey = "session_csrf_token"
 )
 
 // WithActor stores the Actor in the context.
@@ -68,6 +69,20 @@ func LoggerFromContext(ctx context.Context) Logger {
 		return l
 	}
 	return nil
+}
+
+// WithSessionCSRFToken stores the session's CSRF token in the context.
+// This is set by AuthMiddleware for session-based authentication so that
+// CSRFMiddleware can validate the X-CSRF-Token header against it.
+func WithSessionCSRFToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, sessionCSRFKey, token)
+}
+
+// GetSessionCSRFToken retrieves the session's CSRF token from the context.
+// Returns the token and true if present, or empty string and false if not set.
+func GetSessionCSRFToken(ctx context.Context) (string, bool) {
+	token, ok := ctx.Value(sessionCSRFKey).(string)
+	return token, ok && token != ""
 }
 
 // IsTestKey returns true if the API key is a test key.
