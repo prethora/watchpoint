@@ -56,3 +56,9 @@ type Preferences struct {
 	NotifyOnClear          bool `json:"notify_on_clear"`
 	NotifyOnForecastChange bool `json:"notify_on_forecast_change"`
 }
+
+// RedirectURLs is used by the BillingService to guide the user after Stripe checkout.
+type RedirectURLs struct {
+	Success string
+	Cancel  string
+}

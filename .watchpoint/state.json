@@ -506,11 +506,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Code compiles. Interfaces exported.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T00:49:24.086880+00:00",
+        "completed_at": "2026-02-06T00:51:49.883263+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
