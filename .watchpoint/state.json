@@ -650,11 +650,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Code compiles. `Server` struct is exported.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T01:26:08.860510+00:00",
+        "completed_at": "2026-02-06T01:31:37.586614+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
