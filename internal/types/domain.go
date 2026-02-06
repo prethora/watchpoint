@@ -271,19 +271,23 @@ type Notification struct {
 	Urgency        UrgencyLevel           `json:"urgency" db:"urgency"`
 	Payload        map[string]interface{} `json:"payload" db:"payload"`
 	TestMode       bool                   `json:"test_mode" db:"test_mode"`
+	TemplateSet    string                 `json:"template_set" db:"template_set"`
 	CreatedAt      time.Time              `json:"created_at" db:"created_at"`
 }
 
 // NotificationDelivery tracks a single delivery attempt for a notification.
 type NotificationDelivery struct {
-	ID             string      `db:"id"`
-	NotificationID string      `db:"notification_id"`
-	ChannelType    ChannelType `db:"channel_type"`
-	Status         string      `db:"status"`
-	AttemptCount   int         `db:"attempt_count"`
-	LastAttemptAt  time.Time   `db:"last_attempt_at"`
-	FailureReason  string      `db:"failure_reason"`
-	ProviderMsgID  string      `db:"provider_message_id"`
+	ID             string         `db:"id"`
+	NotificationID string         `db:"notification_id"`
+	ChannelType    ChannelType    `db:"channel_type"`
+	ChannelConfig  map[string]any `db:"channel_config"`
+	Status         string         `db:"status"`
+	AttemptCount   int            `db:"attempt_count"`
+	NextRetryAt    time.Time      `db:"next_retry_at"`
+	LastAttemptAt  time.Time      `db:"last_attempt_at"`
+	DeliveredAt    time.Time      `db:"delivered_at"`
+	FailureReason  string         `db:"failure_reason"`
+	ProviderMsgID  string         `db:"provider_message_id"`
 }
 
 // DeliveryResult tracks the outcome of a notification attempt.
