@@ -19,6 +19,8 @@ type Actor struct {
 	ID             string
 	Type           ActorType
 	OrganizationID string
+	Role           UserRole // Current role from live DB lookup (not stale session data).
+	Scopes         []string // API key scopes, or implicit scopes derived from Role for users.
 	IsTestMode     bool
 	Source         string // Origin of the request (e.g., "wedding_app", "dashboard").
 }
@@ -83,6 +85,75 @@ func WithSessionCSRFToken(ctx context.Context, token string) context.Context {
 func GetSessionCSRFToken(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(sessionCSRFKey).(string)
 	return token, ok && token != ""
+}
+
+// GetOrgID retrieves the Organization ID from the Actor in the context.
+// This is a convenience function that extracts OrganizationID from the Actor.
+// Returns empty string and false if no Actor is present in the context.
+func GetOrgID(ctx context.Context) (string, bool) {
+	actor, ok := GetActor(ctx)
+	if !ok || actor.OrganizationID == "" {
+		return "", false
+	}
+	return actor.OrganizationID, true
+}
+
+// HasScope checks whether the Actor possesses the given scope.
+// For API key actors, it checks the Scopes slice directly.
+// For user actors, scopes are implicitly derived from their Role.
+func (a Actor) HasScope(scope string) bool {
+	for _, s := range a.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
+}
+
+// RoleHasAtLeast returns true if the actor's role is equal to or higher than
+// the required role. The hierarchy is: Owner > Admin > Member.
+// Returns false if the actor has no role set.
+func (a Actor) RoleHasAtLeast(required UserRole) bool {
+	return roleLevel(a.Role) >= roleLevel(required)
+}
+
+// roleLevel returns the numeric privilege level for a UserRole.
+// Higher values indicate more privileges.
+func roleLevel(r UserRole) int {
+	switch r {
+	case RoleOwner:
+		return 3
+	case RoleAdmin:
+		return 2
+	case RoleMember:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// RoleScopeMap defines the implicit scopes granted to each user role.
+// Users implicitly have all scopes for their role level; this map is used
+// by the authentication middleware to populate Actor.Scopes for user actors.
+var RoleScopeMap = map[UserRole][]string{
+	RoleOwner: {
+		"watchpoints:read", "watchpoints:write",
+		"forecasts:read",
+		"notifications:read",
+		"account:read", "account:write",
+	},
+	RoleAdmin: {
+		"watchpoints:read", "watchpoints:write",
+		"forecasts:read",
+		"notifications:read",
+		"account:read", "account:write",
+	},
+	RoleMember: {
+		"watchpoints:read", "watchpoints:write",
+		"forecasts:read",
+		"notifications:read",
+		"account:read",
+	},
 }
 
 // IsTestKey returns true if the API key is a test key.

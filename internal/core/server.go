@@ -38,6 +38,7 @@ type Server struct {
 	Validator       *Validator
 	Metrics         MetricsCollector
 	SecurityService types.SecurityService
+	Authenticator   Authenticator // Resolves tokens to Actors; injected for testability.
 
 	// Internal router
 	router *chi.Mux

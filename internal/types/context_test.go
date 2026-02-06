@@ -307,3 +307,151 @@ func TestActorType_Constants(t *testing.T) {
 		t.Errorf("ActorTypeSystem: got %q, want %q", ActorTypeSystem, "system")
 	}
 }
+
+func TestGetOrgID(t *testing.T) {
+	t.Run("returns OrgID from actor in context", func(t *testing.T) {
+		actor := Actor{
+			ID:             "user_1",
+			Type:           ActorTypeUser,
+			OrganizationID: "org_abc123",
+		}
+		ctx := WithActor(context.Background(), actor)
+		orgID, ok := GetOrgID(ctx)
+		if !ok {
+			t.Fatal("expected ok to be true")
+		}
+		if orgID != "org_abc123" {
+			t.Errorf("got %q, want %q", orgID, "org_abc123")
+		}
+	})
+
+	t.Run("returns false when no actor in context", func(t *testing.T) {
+		_, ok := GetOrgID(context.Background())
+		if ok {
+			t.Error("expected ok to be false for empty context")
+		}
+	})
+
+	t.Run("returns false when actor has empty OrgID", func(t *testing.T) {
+		actor := Actor{
+			ID:   "system",
+			Type: ActorTypeSystem,
+			// OrganizationID is empty.
+		}
+		ctx := WithActor(context.Background(), actor)
+		_, ok := GetOrgID(ctx)
+		if ok {
+			t.Error("expected ok to be false for actor with empty OrgID")
+		}
+	})
+}
+
+func TestActor_HasScope(t *testing.T) {
+	tests := []struct {
+		name   string
+		scopes []string
+		check  string
+		want   bool
+	}{
+		{"has exact scope", []string{"watchpoints:read", "watchpoints:write"}, "watchpoints:write", true},
+		{"missing scope", []string{"watchpoints:read"}, "watchpoints:write", false},
+		{"empty scopes", []string{}, "watchpoints:read", false},
+		{"nil scopes", nil, "watchpoints:read", false},
+		{"single match", []string{"account:read"}, "account:read", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actor := Actor{Scopes: tc.scopes}
+			got := actor.HasScope(tc.check)
+			if got != tc.want {
+				t.Errorf("HasScope(%q) = %v, want %v", tc.check, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActor_RoleHasAtLeast(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     UserRole
+		required UserRole
+		want     bool
+	}{
+		{"owner >= owner", RoleOwner, RoleOwner, true},
+		{"owner >= admin", RoleOwner, RoleAdmin, true},
+		{"owner >= member", RoleOwner, RoleMember, true},
+		{"admin >= admin", RoleAdmin, RoleAdmin, true},
+		{"admin >= member", RoleAdmin, RoleMember, true},
+		{"admin < owner", RoleAdmin, RoleOwner, false},
+		{"member >= member", RoleMember, RoleMember, true},
+		{"member < admin", RoleMember, RoleAdmin, false},
+		{"member < owner", RoleMember, RoleOwner, false},
+		{"empty role < member", "", RoleMember, false},
+		{"empty role < admin", "", RoleAdmin, false},
+		{"empty role < owner", "", RoleOwner, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actor := Actor{Role: tc.role}
+			got := actor.RoleHasAtLeast(tc.required)
+			if got != tc.want {
+				t.Errorf("RoleHasAtLeast(%q) = %v, want %v (actor role: %q)", tc.required, got, tc.want, tc.role)
+			}
+		})
+	}
+}
+
+func TestRoleScopeMap_Coverage(t *testing.T) {
+	// Verify all roles have entries.
+	for _, role := range []UserRole{RoleOwner, RoleAdmin, RoleMember} {
+		scopes, ok := RoleScopeMap[role]
+		if !ok {
+			t.Errorf("RoleScopeMap missing entry for role %q", role)
+		}
+		if len(scopes) == 0 {
+			t.Errorf("RoleScopeMap[%q] has empty scopes", role)
+		}
+	}
+
+	// Verify Owner and Admin have account:write; Member does not.
+	ownerScopes := RoleScopeMap[RoleOwner]
+	hasAccountWrite := false
+	for _, s := range ownerScopes {
+		if s == "account:write" {
+			hasAccountWrite = true
+		}
+	}
+	if !hasAccountWrite {
+		t.Error("Owner should have account:write scope")
+	}
+
+	memberScopes := RoleScopeMap[RoleMember]
+	for _, s := range memberScopes {
+		if s == "account:write" {
+			t.Error("Member should NOT have account:write scope")
+		}
+	}
+}
+
+func TestActor_RoleAndScopes_RoundTrip(t *testing.T) {
+	actor := Actor{
+		ID:             "user_full",
+		Type:           ActorTypeUser,
+		OrganizationID: "org_123",
+		Role:           RoleAdmin,
+		Scopes:         RoleScopeMap[RoleAdmin],
+		IsTestMode:     false,
+		Source:         "dashboard",
+	}
+	ctx := WithActor(context.Background(), actor)
+	got, ok := GetActor(ctx)
+	if !ok {
+		t.Fatal("expected actor in context")
+	}
+	if got.Role != RoleAdmin {
+		t.Errorf("Role: got %q, want %q", got.Role, RoleAdmin)
+	}
+	if len(got.Scopes) != len(RoleScopeMap[RoleAdmin]) {
+		t.Errorf("Scopes: got %d, want %d", len(got.Scopes), len(RoleScopeMap[RoleAdmin]))
+	}
+}
