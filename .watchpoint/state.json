@@ -1595,11 +1595,11 @@
           "FAIL-005"
         ],
         "definition_of_done": "Unit tests cover Nowcast synchronization logic (intersection). Integration test runs full poll cycle.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T12:21:51.351331+00:00",
+        "completed_at": "2026-02-06T12:30:35.667674+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {

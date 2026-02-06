@@ -110,6 +110,36 @@ func (r *ForecastRunRepository) GetLatestServing(ctx context.Context, model type
 	return run, nil
 }
 
+// GetLatest returns the most recent forecast run for a given model regardless
+// of status. This is used by the DataPoller (FCST-003) to determine the latest
+// run_timestamp for a model, avoiding re-triggering inference for runs that
+// are already in progress or completed.
+//
+// SQL: SELECT * FROM forecast_runs WHERE model=$1 ORDER BY run_timestamp DESC LIMIT 1
+//
+// Returns nil (not an error) when no runs exist for the model.
+func (r *ForecastRunRepository) GetLatest(ctx context.Context, model types.ForecastType) (*types.ForecastRun, error) {
+	row := r.db.QueryRow(ctx,
+		`SELECT id, model, run_timestamp, source_data_timestamp, storage_path,
+		        status, external_id, retry_count, failure_reason,
+		        inference_duration_ms, created_at
+		 FROM forecast_runs
+		 WHERE model = $1
+		 ORDER BY run_timestamp DESC
+		 LIMIT 1`,
+		string(model),
+	)
+
+	run, err := scanForecastRun(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, types.NewAppError(types.ErrCodeInternalDB, "failed to query latest forecast run", err)
+	}
+	return run, nil
+}
+
 // GetByTimestamp retrieves a forecast run by model and run_timestamp.
 // This is the critical query for the Batcher's Phantom Run check (IMPL-003).
 // The Batcher uses this to verify that a forecast run was legitimately created
