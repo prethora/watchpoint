@@ -1634,11 +1634,11 @@
           "SCHED-002"
         ],
         "definition_of_done": "Integration tests verify race-free reset of rate limits.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T12:36:49.745175+00:00",
+        "completed_at": "2026-02-06T12:43:58.827085+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
