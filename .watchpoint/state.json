@@ -2256,11 +2256,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Running `make build-images` results in correct architecture images (inspect via `docker inspect`).",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T20:11:45.409671+00:00Z",
+        "completed_at": "2026-02-06T20:14:54.939406+00:00Z",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {

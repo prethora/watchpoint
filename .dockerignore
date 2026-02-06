@@ -19,6 +19,7 @@
 # Compiled Go Binaries (root-level and bin/)
 # -----------------------------------------------------------------------------
 bin/
+dist/
 archiver
 batcher
 email-worker

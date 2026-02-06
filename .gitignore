@@ -36,6 +36,7 @@ localstack_data/
 .aws-sam/
 
 # Build artifacts
+dist/
 samconfig.toml
 stack-outputs.json
 
