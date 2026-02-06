@@ -486,3 +486,26 @@ class NotificationPayload(BaseModel):
     urgency: str
     source_model: str
     ordering: OrderingMetadata
+
+
+# ---------------------------------------------------------------------------
+# Batch Result (output of evaluation pipeline)
+# ---------------------------------------------------------------------------
+
+
+class BatchResult(BaseModel):
+    """Output of a batch evaluation run.
+
+    Defined in ``07-eval-worker.md`` Section 4.2. Contains the evaluation
+    state updates and notification events that must be committed atomically
+    by the Repository.
+
+    The ``state_updates`` list contains the new state for every WatchPoint
+    that was evaluated (whether or not it triggered). The ``notifications``
+    list contains only the events that require downstream delivery.
+    """
+
+    model_config = {"populate_by_name": True}
+
+    state_updates: list[EvaluationState] = []
+    notifications: list[NotificationEvent] = []

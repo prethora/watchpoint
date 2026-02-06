@@ -1428,11 +1428,11 @@
           "EVAL-001"
         ],
         "definition_of_done": "Integration test: Can read/write state to DB and publish a message to LocalStack SQS.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T11:04:33.038681+00:00",
+        "completed_at": "2026-02-06T11:13:53.151351+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
