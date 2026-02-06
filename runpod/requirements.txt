@@ -1,0 +1,21 @@
+# WatchPoint RunPod Inference Worker - Python Dependencies
+# Used by the GPU-accelerated inference worker deployed on RunPod Serverless.
+
+# RunPod SDK
+runpod>=1.6.0
+
+# Data Science Stack (shared with eval worker)
+numpy>=1.24.0
+xarray>=2023.0.0
+zarr>=2.16.0
+s3fs>=2023.6.0
+pandas>=2.0.0
+
+# ML Inference
+torch>=2.0.0
+onnxruntime-gpu>=1.15.0
+
+# Infrastructure
+boto3>=1.28.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0

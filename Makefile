@@ -1,4 +1,4 @@
-.PHONY: test build clean migrate-up migrate-down mocks
+.PHONY: test build clean migrate-up migrate-down mocks lint-python
 
 # Database connection string used by the migrate container (connects via Docker network)
 MIGRATE_DB_URL := postgres://postgres:localdev@postgres:5432/watchpoint?sslmode=disable
@@ -42,3 +42,8 @@ mocks:
 		--outpkg mocks \
 		--output internal/external/mocks \
 		--dir internal/external
+
+# Lint Python code (eval worker and runpod) using black and mypy
+lint-python:
+	black --check worker/ runpod/
+	mypy worker/ runpod/ --ignore-missing-imports

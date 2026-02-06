@@ -1,0 +1,5 @@
+# Development dependencies for Python linting and type checking
+-r requirements.txt
+
+black>=23.0.0
+mypy>=1.4.0

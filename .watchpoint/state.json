@@ -1328,11 +1328,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`pip install -r worker/requirements.txt` succeeds. Linting passes.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T10:05:51.241780+00:00",
+        "completed_at": "2026-02-06T10:10:05.083636+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
