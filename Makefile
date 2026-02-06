@@ -1,4 +1,4 @@
-.PHONY: test build clean migrate-up migrate-down mocks lint-python run-job
+.PHONY: test build clean migrate-up migrate-down mocks lint-python run-job run-stack stop-stack
 
 # Database connection string used by the migrate container (connects via Docker network)
 MIGRATE_DB_URL := postgres://postgres:localdev@postgres:5432/watchpoint?sslmode=disable
@@ -61,3 +61,25 @@ else ifdef DRY_RUN
 else
 	go run ./cmd/tools/job-runner --task=$(TASK) $(if $(REF_TIME),--reference-time=$(REF_TIME))
 endif
+
+# Start the full local stack (API, eval worker, notification workers).
+# Requires Docker Compose services to be running: docker compose up -d
+# See scripts/start-local-stack.sh for details.
+run-stack:
+	./scripts/start-local-stack.sh
+
+# Stop the local stack by sending SIGTERM to all service PIDs.
+# Useful if the orchestrator was backgrounded or running in another terminal.
+stop-stack:
+	@if [ -f test_artifacts/.pids ]; then \
+		while IFS='=' read -r name pid; do \
+			if kill -0 "$$pid" 2>/dev/null; then \
+				echo "Stopping $$name (PID $$pid)..."; \
+				kill "$$pid" 2>/dev/null || true; \
+			fi; \
+		done < test_artifacts/.pids; \
+		rm -f test_artifacts/.pids; \
+		echo "Local stack stopped."; \
+	else \
+		echo "No PID file found at test_artifacts/.pids (stack may not be running)."; \
+	fi

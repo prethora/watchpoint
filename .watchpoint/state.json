@@ -2092,11 +2092,11 @@
           "INT-002"
         ],
         "definition_of_done": "Running the script starts the API and Workers. The `test_artifacts/system.log` file populates with startup logs.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T17:31:20.960271+00:00",
+        "completed_at": "2026-02-06T17:35:44.692736+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
