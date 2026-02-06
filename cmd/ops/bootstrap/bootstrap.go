@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,6 +76,12 @@ type BootstrapStep struct {
 // maxRetries is the maximum number of times the operator can retry entering
 // a value before the bootstrap process aborts for that step.
 const maxRetries = 5
+
+// errSkipped is a sentinel error returned by promptAndValidate when the
+// operator chooses to skip a parameter by entering empty input and then
+// confirming the skip. This allows processStep to record the parameter
+// as "skipped" without writing to SSM.
+var errSkipped = errors.New("parameter skipped by operator")
 
 // BuildInventory constructs the ordered list of bootstrap steps matching
 // the Secret Inventory Table in 13-human-setup.md Section 4.
@@ -339,6 +346,11 @@ func (r *BootstrapRunner) processStep(ctx context.Context, step BootstrapStep) (
 	switch step.Source {
 	case SourcePrompt:
 		value, err = r.promptAndValidate(ctx, step)
+		if errors.Is(err, errSkipped) {
+			fmt.Fprintf(r.Stderr, "  Skipped.\n")
+			result.Action = "skipped"
+			return result, nil
+		}
 		if err != nil {
 			return result, err
 		}
@@ -398,7 +410,15 @@ func (r *BootstrapRunner) promptAndValidate(ctx context.Context, step BootstrapS
 
 		input = strings.TrimSpace(input)
 		if input == "" {
-			fmt.Fprintf(r.Stderr, "  Input must not be empty. Try again (%d/%d).\n", attempt, maxRetries)
+			choice, choiceErr := r.promptSkipOrRetry()
+			if choiceErr != nil {
+				return "", fmt.Errorf("reading skip/retry choice for %s: %w", step.HumanLabel, choiceErr)
+			}
+			if choice == "skip" {
+				return "", errSkipped
+			}
+			// choice == "retry": re-prompt without consuming an attempt.
+			attempt--
 			continue
 		}
 
@@ -494,6 +514,32 @@ func (r *BootstrapRunner) promptSkipOrOverwrite() (string, error) {
 			return "overwrite", nil
 		default:
 			fmt.Fprintf(r.Stderr, "  Please enter 'S' to skip or 'O' to overwrite.\n")
+		}
+	}
+}
+
+// promptSkipOrRetry asks the operator whether to skip the current parameter
+// or retry entering a value. This is invoked when the operator provides
+// empty input for a prompted parameter, allowing them to skip optional
+// parameters (e.g., OAuth credentials not needed for API-key-only access).
+// Returns "skip" or "retry".
+func (r *BootstrapRunner) promptSkipOrRetry() (string, error) {
+	for {
+		fmt.Fprint(r.Stderr, "  No input received. [S]kip this parameter or [R]etry? ")
+
+		line, err := r.scanLine()
+		if err != nil {
+			return "", err
+		}
+
+		choice := strings.TrimSpace(strings.ToLower(line))
+		switch choice {
+		case "s", "skip":
+			return "skip", nil
+		case "r", "retry":
+			return "retry", nil
+		default:
+			fmt.Fprintf(r.Stderr, "  Please enter 'S' to skip or 'R' to retry.\n")
 		}
 	}
 }

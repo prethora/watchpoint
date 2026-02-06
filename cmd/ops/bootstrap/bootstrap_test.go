@@ -573,8 +573,8 @@ func TestProcessStep_EmptyInputRetries(t *testing.T) {
 		},
 	}
 
-	// First input is empty, second is valid.
-	runner, _ := newBootstrapTestRunner(mock, "\nvalid-input\n")
+	// First input is empty, operator chooses retry, then provides valid input.
+	runner, _ := newBootstrapTestRunner(mock, "\nr\nvalid-input\n")
 
 	_, err := runner.processStep(context.Background(), step)
 	if err != nil {
@@ -731,6 +731,277 @@ func TestPromptSkipOrOverwrite_EOF(t *testing.T) {
 	_, err := runner.promptSkipOrOverwrite()
 	if err == nil {
 		t.Fatal("expected error on EOF")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// promptSkipOrRetry tests
+// ---------------------------------------------------------------------------
+
+func TestPromptSkipOrRetry_Skip(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"s\n"},
+		{"S\n"},
+		{"skip\n"},
+		{"Skip\n"},
+		{"SKIP\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			runner := &BootstrapRunner{
+				Stdin:  strings.NewReader(tt.input),
+				Stderr: &bytes.Buffer{},
+			}
+
+			choice, err := runner.promptSkipOrRetry()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if choice != "skip" {
+				t.Errorf("choice = %q, want %q", choice, "skip")
+			}
+		})
+	}
+}
+
+func TestPromptSkipOrRetry_Retry(t *testing.T) {
+	tests := []struct {
+		input string
+	}{
+		{"r\n"},
+		{"R\n"},
+		{"retry\n"},
+		{"Retry\n"},
+		{"RETRY\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			runner := &BootstrapRunner{
+				Stdin:  strings.NewReader(tt.input),
+				Stderr: &bytes.Buffer{},
+			}
+
+			choice, err := runner.promptSkipOrRetry()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if choice != "retry" {
+				t.Errorf("choice = %q, want %q", choice, "retry")
+			}
+		})
+	}
+}
+
+func TestPromptSkipOrRetry_InvalidThenValid(t *testing.T) {
+	runner := &BootstrapRunner{
+		Stdin:  strings.NewReader("x\ninvalid\ns\n"),
+		Stderr: &bytes.Buffer{},
+	}
+
+	choice, err := runner.promptSkipOrRetry()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if choice != "skip" {
+		t.Errorf("choice = %q, want %q", choice, "skip")
+	}
+}
+
+func TestPromptSkipOrRetry_EOF(t *testing.T) {
+	runner := &BootstrapRunner{
+		Stdin:  strings.NewReader(""),
+		Stderr: &bytes.Buffer{},
+	}
+
+	_, err := runner.promptSkipOrRetry()
+	if err == nil {
+		t.Fatal("expected error on EOF")
+	}
+}
+
+func TestPromptSkipOrRetry_MessageShown(t *testing.T) {
+	stderr := &bytes.Buffer{}
+	runner := &BootstrapRunner{
+		Stdin:  strings.NewReader("s\n"),
+		Stderr: stderr,
+	}
+
+	_, err := runner.promptSkipOrRetry()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "No input received") {
+		t.Errorf("stderr should contain 'No input received', got: %q", output)
+	}
+	if !strings.Contains(output, "[S]kip") {
+		t.Errorf("stderr should contain '[S]kip', got: %q", output)
+	}
+	if !strings.Contains(output, "[R]etry") {
+		t.Errorf("stderr should contain '[R]etry', got: %q", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Skip-on-empty processStep tests
+// ---------------------------------------------------------------------------
+
+func TestProcessStep_EmptyInputSkipped(t *testing.T) {
+	mock := &mockSSMClient{
+		getParameterFn: mockGetParameterExisting(map[string]bool{}),
+	}
+
+	step := BootstrapStep{
+		HumanLabel:     "Google Client ID",
+		SSMCategoryKey: "auth/google_client_id",
+		ParamType:      ParamString,
+		Source:         SourcePrompt,
+		Prompt:         "Paste Google Client ID:",
+		IsSecret:       false,
+		ValidateFn: func(_ context.Context, _ string) ValidationResult {
+			return ValidationResult{Valid: true, Message: "ok"}
+		},
+	}
+
+	// Operator enters empty input, then chooses to skip.
+	runner, stderr := newBootstrapTestRunner(mock, "\ns\n")
+
+	result, err := runner.processStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Action != "skipped" {
+		t.Errorf("action = %q, want %q", result.Action, "skipped")
+	}
+
+	if len(mock.putCalls) != 0 {
+		t.Errorf("expected no put calls when skipping, got %d", len(mock.putCalls))
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "Skipped.") {
+		t.Errorf("output should contain 'Skipped.', got: %q", output)
+	}
+}
+
+func TestProcessStep_EmptyInputRetryThenProvide(t *testing.T) {
+	mock := &mockSSMClient{
+		getParameterFn: mockGetParameterExisting(map[string]bool{}),
+	}
+
+	step := BootstrapStep{
+		HumanLabel:     "Google Client ID",
+		SSMCategoryKey: "auth/google_client_id",
+		ParamType:      ParamString,
+		Source:         SourcePrompt,
+		Prompt:         "Paste Google Client ID:",
+		IsSecret:       false,
+		ValidateFn: func(_ context.Context, _ string) ValidationResult {
+			return ValidationResult{Valid: true, Message: "ok"}
+		},
+	}
+
+	// Operator enters empty, retries, then provides valid input.
+	runner, _ := newBootstrapTestRunner(mock, "\nr\nmy-google-client-id\n")
+
+	result, err := runner.processStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Action != "written" {
+		t.Errorf("action = %q, want %q", result.Action, "written")
+	}
+
+	if len(mock.putCalls) != 1 {
+		t.Fatalf("expected 1 put call, got %d", len(mock.putCalls))
+	}
+	if aws.ToString(mock.putCalls[0].Value) != "my-google-client-id" {
+		t.Errorf("put value = %q, want %q", aws.ToString(mock.putCalls[0].Value), "my-google-client-id")
+	}
+}
+
+func TestProcessStep_EmptyInputSkipDoesNotConsumeRetries(t *testing.T) {
+	mock := &mockSSMClient{
+		getParameterFn: mockGetParameterExisting(map[string]bool{}),
+	}
+
+	validationCallCount := 0
+	step := BootstrapStep{
+		HumanLabel:     "Test Key",
+		SSMCategoryKey: "test/key",
+		ParamType:      ParamString,
+		Source:         SourcePrompt,
+		Prompt:         "Enter value:",
+		IsSecret:       false,
+		ValidateFn: func(_ context.Context, _ string) ValidationResult {
+			validationCallCount++
+			return ValidationResult{Valid: true, Message: "ok"}
+		},
+	}
+
+	// Enter empty maxRetries times (all with retry), then provide valid input.
+	// This verifies that empty+retry does not consume retry attempts.
+	var inputs []string
+	for i := 0; i < maxRetries+2; i++ {
+		inputs = append(inputs, "")  // empty input
+		inputs = append(inputs, "r") // retry
+	}
+	inputs = append(inputs, "valid-value") // final valid input
+
+	runner, _ := newBootstrapTestRunner(mock, strings.Join(inputs, "\n")+"\n")
+
+	result, err := runner.processStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Action != "written" {
+		t.Errorf("action = %q, want %q", result.Action, "written")
+	}
+
+	if validationCallCount != 1 {
+		t.Errorf("validation called %d times, want 1", validationCallCount)
+	}
+}
+
+func TestProcessStep_SecretEmptyInputSkipped(t *testing.T) {
+	mock := &mockSSMClient{
+		getParameterFn: mockGetParameterExisting(map[string]bool{}),
+	}
+
+	step := BootstrapStep{
+		HumanLabel:     "Google Client Secret",
+		SSMCategoryKey: "auth/google_secret",
+		ParamType:      ParamSecureString,
+		Source:         SourcePrompt,
+		Prompt:         "Paste Google Client Secret:",
+		IsSecret:       true,
+		ValidateFn: func(_ context.Context, _ string) ValidationResult {
+			return ValidationResult{Valid: true, Message: "ok"}
+		},
+	}
+
+	// Secret input: empty, then skip.
+	runner, _ := newBootstrapTestRunner(mock, "\ns\n")
+
+	result, err := runner.processStep(context.Background(), step)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Action != "skipped" {
+		t.Errorf("action = %q, want %q", result.Action, "skipped")
+	}
+
+	if len(mock.putCalls) != 0 {
+		t.Errorf("expected no put calls when skipping, got %d", len(mock.putCalls))
 	}
 }
 

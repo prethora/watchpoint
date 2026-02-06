@@ -30,6 +30,7 @@ This document is written for the **AI Agent** executing the setup. It defines th
 2.  **Idempotency**: Before asking for a value, always probe AWS SSM (`aws ssm get-parameter`) to see if it already exists. If found, ask to **[Skip]** or **[Overwrite]**.
 3.  **Validation**: Always validate input syntax (Regex) or function (Curl) before accepting it. Fail fast.
 4.  **Context**: Maintain the `Environment` (dev/staging/prod) and `AWS_PROFILE` context throughout the session.
+5.  **Optional Parameters / Incremental Setup**: The bootstrap tool supports skipping any prompted parameter by pressing Enter (empty input) and then confirming with **[S]kip**. This enables partial or incremental setup -- for example, OAuth credentials (Google/GitHub) are only needed if the operator wants dashboard login and can be omitted for API-key-based developer access. Auto-generated parameters (Session Key, Admin API Key) and fixed-value parameters are always populated and cannot be skipped. Because the tool is fully idempotent (Directive 2), skipped parameters can be populated in a subsequent bootstrap run without affecting previously configured values.
 
 ### Interaction Schema
 
