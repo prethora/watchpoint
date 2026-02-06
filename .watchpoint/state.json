@@ -2301,9 +2301,9 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`go run cmd/ops/bootstrap/main.go --env=dev` prints the account ID and connects to AWS successfully. `prod` flag triggers confirmation prompt.",
-        "status": "unprocessed",
+        "status": "in_progress",
         "reports": [],
-        "started_at": null,
+        "started_at": "2026-02-06T20:31:26.256957+00:00",
         "completed_at": null,
         "satisfaction_iterations": null,
         "skip_reason": null
@@ -2420,7 +2420,7 @@
         "skip_reason": null
       }
     ],
-    "status": "unprocessed",
+    "status": "in_progress",
     "phase_completed_at": null,
     "phase_verification": null
   },
