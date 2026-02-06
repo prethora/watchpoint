@@ -489,11 +489,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`client.go` exists. Unit test `client_test.go` using `httptest` confirms retries happen on 500s and circuit breaker opens after threshold.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T00:41:57.441834+00:00",
+        "completed_at": "2026-02-06T00:49:10.458598+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

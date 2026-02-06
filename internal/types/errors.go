@@ -61,6 +61,7 @@ const (
 	ErrCodeUpstreamStripe        ErrorCode = "upstream_stripe_unavailable"
 	ErrCodeUpstreamEmailProvider ErrorCode = "upstream_email_provider_unavailable"
 	ErrCodeUpstreamForecast      ErrorCode = "upstream_forecast_unavailable"
+	ErrCodeUpstreamUnavailable   ErrorCode = "upstream_unavailable"
 	ErrCodeUpstreamRateLimited   ErrorCode = "upstream_rate_limited"
 
 	// Payment-specific
