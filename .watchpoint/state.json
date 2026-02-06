@@ -2239,11 +2239,11 @@
           "FCST-001"
         ],
         "definition_of_done": "`docker build --platform linux/amd64 -f runpod/Dockerfile .` completes successfully.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T19:36:44.890662+00:00Z",
+        "completed_at": "2026-02-06T20:11:33.849675+00:00Z",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
