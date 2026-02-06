@@ -2301,11 +2301,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`go run cmd/ops/bootstrap/main.go --env=dev` prints the account ID and connects to AWS successfully. `prod` flag triggers confirmation prompt.",
-        "status": "in_progress",
+        "status": "complete",
         "reports": [],
         "started_at": "2026-02-06T20:31:26.256957+00:00",
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "completed_at": "2026-02-06T20:34:36.427706+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
@@ -2319,9 +2319,9 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Unit tests (or integration tests against LocalStack) verify parameters are written correctly with encryption.",
-        "status": "unprocessed",
+        "status": "in_progress",
         "reports": [],
-        "started_at": null,
+        "started_at": "2026-02-06T20:34:36.427767+00:00",
         "completed_at": null,
         "satisfaction_iterations": null,
         "skip_reason": null
