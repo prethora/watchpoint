@@ -1,0 +1,22 @@
+{
+    "model": "medium_range",
+    "num_time_steps": 6,
+    "baseline": 0.0,
+    "baselines": {
+        "temperature_c": 15.0,
+        "humidity_percent": 50.0
+    },
+    "points": [
+        {
+            "lat": 40.0,
+            "lon": -74.0,
+            "values": {
+                "precipitation_probability": 5.0,
+                "precipitation_mm": 0.5,
+                "temperature_c": 18.0,
+                "wind_speed_kmh": 8.0,
+                "humidity_percent": 45.0
+            }
+        }
+    ]
+}

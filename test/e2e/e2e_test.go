@@ -894,6 +894,443 @@ func TestTracePropagation(t *testing.T) {
 	t.Logf("  Deliveries:     %d record(s)", len(deliveries))
 }
 
+// ==========================================================================
+// INT-004: Monitor Mode Daily Cycle
+// ==========================================================================
+//
+// This test exercises the Monitor Mode evaluation flow, verifying that:
+//
+//  1. A Monitor Mode WatchPoint (no time window, has monitor_config) is created
+//     and correctly associated with a tile.
+//  2. Phase 1 (Baseline): The first evaluation suppresses notifications per
+//     EVAL-005 (First Eval Suppression) while still populating the
+//     last_forecast_summary in watchpoint_evaluation_state.
+//  3. Phase 2 (Change): A subsequent evaluation with different forecast data
+//     detects new threats and generates a "monitor_digest" notification in the
+//     database, along with corresponding notification_deliveries records.
+//
+// This validates the core Monitor Mode pipeline:
+//
+//	DB (org+user+wp) -> Seeder (Zarr) -> Batcher (SQS) -> EvalWorker (evaluate)
+//	  -> DB (evaluation_state + notifications + deliveries)
+//
+// Key architectural flows:
+//   - EVAL-005 (First Evaluation Baseline Establishment)
+//   - EVAL-003 (Monitor Mode Evaluation)
+//   - NOTIF-003 (Digest Generation - verified at data level)
+//
+// Architecture reference: flow-simulations.md INT-004
+// Scenario configs: scripts/scenarios/int004_monitor_safe.json
+//
+//	scripts/scenarios/int004_monitor_threat.json
+
+func TestMonitorMode_Digest(t *testing.T) {
+	if env == nil {
+		t.Fatal("test environment not initialized")
+	}
+
+	LogSeparator(t, "INT-004: Monitor Mode Daily Cycle")
+
+	// -----------------------------------------------------------------------
+	// Step 0: Clean up any residual data from prior runs
+	// -----------------------------------------------------------------------
+	t.Log("Step 0: Cleaning up test data from prior runs...")
+	env.CleanupTestData(t)
+
+	ctx := context.Background()
+
+	// -----------------------------------------------------------------------
+	// Step 1: Create Organization and User
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "Step 1: Create Organization & User")
+
+	orgID := "org_" + uuid.New().String()
+	userID := "user_" + uuid.New().String()
+	orgEmail := fmt.Sprintf("int004-%s@example.com", uuid.New().String()[:8])
+
+	_, err := env.Pool.Exec(ctx,
+		`INSERT INTO organizations (id, name, billing_email, plan, plan_limits, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+		orgID,
+		"INT-004 Test Org",
+		orgEmail,
+		"free",
+		`{"watchpoints_max": 100, "api_calls_max": 10000, "notifications_max": 1000}`,
+	)
+	if err != nil {
+		t.Fatalf("Step 1: failed to insert organization: %v", err)
+	}
+	t.Logf("  Organization created: %s", orgID)
+
+	_, err = env.Pool.Exec(ctx,
+		`INSERT INTO users (id, organization_id, email, role, created_at)
+		 VALUES ($1, $2, $3, $4, NOW())`,
+		userID, orgID, orgEmail, "owner",
+	)
+	if err != nil {
+		t.Fatalf("Step 1: failed to insert user: %v", err)
+	}
+	t.Logf("  User created: %s", userID)
+
+	// -----------------------------------------------------------------------
+	// Step 2: Create Monitor Mode WatchPoint via direct DB insert
+	// -----------------------------------------------------------------------
+	// Monitor Mode WatchPoints:
+	//   - Have monitor_config (not nil)
+	//   - Have no time_window_start / time_window_end
+	//   - Use conditions for threshold-based monitoring
+	//
+	// Location: lat=40.0, lon=-74.0 (matches scenario configs)
+	// Condition: precipitation_probability > 50% (threshold below the 80%
+	//   value in the threat scenario, ensuring the trigger fires)
+	// Channel: email (with test address)
+	LogSeparator(t, "Step 2: Create WatchPoint (Monitor Mode)")
+
+	conditions := []map[string]interface{}{
+		{
+			"variable":  "precipitation_probability",
+			"operator":  ">",
+			"threshold": 50.0,
+		},
+	}
+
+	channels := []map[string]interface{}{
+		{
+			"type":    "email",
+			"config":  map[string]interface{}{"address": orgEmail},
+			"enabled": true,
+		},
+	}
+
+	// monitor_config is required for Monitor Mode (replaces time_window)
+	// window_hours defines the rolling window for analysis.
+	monitorConfig := map[string]interface{}{
+		"window_hours": 48,
+		"active_hours": []interface{}{},
+		"active_days":  []interface{}{},
+	}
+
+	wp := CreateWatchPointDirect(
+		t, env, orgID,
+		"INT-004 Monitor WatchPoint",
+		40.0, -74.0,
+		conditions, "ANY", channels,
+		nil, nil, // No time window for monitor mode
+		monitorConfig,
+	)
+
+	t.Logf("  WatchPoint created: %s (tile_id=%s, status=%s)", wp.ID, wp.TileID, wp.Status)
+
+	// Verify tile assignment (same location as INT-001: tile "2.6").
+	expectedTileID := "2.6"
+	if wp.TileID != expectedTileID {
+		t.Fatalf("Step 2: expected tile_id %q, got %q", expectedTileID, wp.TileID)
+	}
+	t.Logf("  Tile ID verified: %s", wp.TileID)
+
+	// Verify monitor_config is stored (not null).
+	var monitorCfgCheck interface{}
+	err = env.Pool.QueryRow(ctx,
+		`SELECT monitor_config FROM watchpoints WHERE id = $1`, wp.ID,
+	).Scan(&monitorCfgCheck)
+	if err != nil {
+		t.Fatalf("Step 2: failed to verify monitor_config: %v", err)
+	}
+	if monitorCfgCheck == nil {
+		t.Fatal("Step 2: monitor_config is NULL -- monitor mode WatchPoint must have monitor_config set")
+	}
+	t.Log("  monitor_config verified: non-null")
+
+	// -----------------------------------------------------------------------
+	// Step 3: Phase 1 -- Baseline (Safe Data)
+	// -----------------------------------------------------------------------
+	// Seed "safe" forecast data (precipitation_probability = 5%, well below
+	// the threshold of 50%). Trigger the pipeline. The eval worker should:
+	//   1. Evaluate the WatchPoint against the safe data
+	//   2. Populate last_forecast_summary in evaluation state
+	//   3. NOT generate any notification (EVAL-005: first eval suppression)
+	//
+	// Even though the data is safe (below threshold), the first eval for
+	// monitor mode always suppresses notifications regardless of trigger state.
+	LogSeparator(t, "Step 3: Phase 1 -- Baseline (Safe Data)")
+
+	// Seed forecast_runs record for Phase 1
+	now := time.Now().UTC()
+	forecastTS1 := now.Truncate(time.Second)
+	forecastTS1Str := forecastTS1.Format(time.RFC3339)
+	runID1 := "run_" + uuid.New().String()
+
+	_, err = env.Pool.Exec(ctx,
+		`INSERT INTO forecast_runs
+		 (id, model, run_timestamp, source_data_timestamp, storage_path, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+		runID1,
+		"medium_range",
+		forecastTS1,
+		forecastTS1,
+		fmt.Sprintf("forecasts/medium_range/%s/_SUCCESS", forecastTS1Str),
+		"running",
+	)
+	if err != nil {
+		t.Fatalf("Step 3: failed to insert forecast_runs record: %v", err)
+	}
+	t.Logf("  Phase 1 forecast run: %s (ts=%s)", runID1, forecastTS1Str)
+
+	// Seed safe data and trigger the pipeline.
+	safeScenario := filepath.Join(env.Config.ProjectRoot, "scripts", "scenarios", "int004_monitor_safe.json")
+	t.Logf("  Scenario: %s (safe data, precip=5%%)", safeScenario)
+
+	TriggerForecast(t, env, safeScenario, "medium_range", forecastTS1Str)
+	t.Log("  Phase 1 pipeline triggered (seeder + batcher)")
+
+	// -----------------------------------------------------------------------
+	// Step 4: Verify Phase 1 -- Evaluation state populated, NO notification
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "Step 4: Verify Phase 1 (Baseline Established)")
+
+	// Wait for the eval worker to process and update evaluation state.
+	// We pass nil for expectTriggered to accept any trigger state --
+	// we just want to confirm the evaluation happened.
+	WaitForEvaluationState(t, env, wp.ID, nil)
+	t.Log("  Evaluation state populated (eval worker processed Phase 1)")
+
+	// Verify last_forecast_summary is populated in the evaluation state.
+	var summaryJSON interface{}
+	var evalLastEvaluated time.Time
+	err = env.Pool.QueryRow(ctx,
+		`SELECT last_forecast_summary, last_evaluated_at
+		 FROM watchpoint_evaluation_state
+		 WHERE watchpoint_id = $1`,
+		wp.ID,
+	).Scan(&summaryJSON, &evalLastEvaluated)
+	if err != nil {
+		t.Fatalf("Step 4: failed to query evaluation state: %v", err)
+	}
+	if summaryJSON == nil {
+		t.Fatal("Step 4: last_forecast_summary is NULL after Phase 1 -- eval should populate it")
+	}
+	t.Logf("  last_forecast_summary: populated (non-null)")
+	t.Logf("  last_evaluated_at: %s", evalLastEvaluated.Format(time.RFC3339))
+
+	// Verify NO notification was created (EVAL-005: first eval suppression).
+	// The first evaluation for a monitor mode WatchPoint suppresses all
+	// notifications to establish a baseline.
+	notifCount := QueryDBScalar[int](t, env,
+		"SELECT COUNT(*) FROM notifications WHERE watchpoint_id = $1",
+		wp.ID,
+	)
+	if notifCount != 0 {
+		t.Fatalf("Step 4: expected 0 notifications after Phase 1 (EVAL-005: first eval suppression), got %d", notifCount)
+	}
+	t.Log("  No notifications created (EVAL-005: first eval suppression confirmed)")
+
+	// Record the Phase 1 evaluation timestamp for comparison in Phase 2.
+	phase1EvalTime := evalLastEvaluated
+
+	// -----------------------------------------------------------------------
+	// Step 5: Phase 2 -- Change (Threat Data)
+	// -----------------------------------------------------------------------
+	// Seed "threat" forecast data (precipitation_probability = 80%, above the
+	// threshold of 50%). The eval worker should:
+	//   1. Detect this is NOT the first eval (last_evaluated_at is set)
+	//   2. Evaluate conditions (precip 80% > threshold 50%)
+	//   3. Detect new threats (violations in the forecast window)
+	//   4. Generate a "monitor_digest" notification
+	//   5. Create notification_deliveries for the email channel
+	LogSeparator(t, "Step 5: Phase 2 -- Change (Threat Data)")
+
+	// Use a timestamp slightly in the future to avoid stale write protection.
+	// The eval worker uses CONC-006 stale write protection: it skips state
+	// updates if last_forecast_run >= msg_timestamp. Using a new, later
+	// timestamp ensures the update goes through.
+	forecastTS2 := forecastTS1.Add(15 * time.Minute)
+	forecastTS2Str := forecastTS2.Format(time.RFC3339)
+	runID2 := "run_" + uuid.New().String()
+
+	_, err = env.Pool.Exec(ctx,
+		`INSERT INTO forecast_runs
+		 (id, model, run_timestamp, source_data_timestamp, storage_path, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+		runID2,
+		"medium_range",
+		forecastTS2,
+		forecastTS2,
+		fmt.Sprintf("forecasts/medium_range/%s/_SUCCESS", forecastTS2Str),
+		"running",
+	)
+	if err != nil {
+		t.Fatalf("Step 5: failed to insert Phase 2 forecast_runs record: %v", err)
+	}
+	t.Logf("  Phase 2 forecast run: %s (ts=%s)", runID2, forecastTS2Str)
+
+	// Seed threat data and trigger the pipeline.
+	threatScenario := filepath.Join(env.Config.ProjectRoot, "scripts", "scenarios", "int004_monitor_threat.json")
+	t.Logf("  Scenario: %s (threat data, precip=80%%)", threatScenario)
+
+	TriggerForecast(t, env, threatScenario, "medium_range", forecastTS2Str)
+	t.Log("  Phase 2 pipeline triggered (seeder + batcher)")
+
+	// -----------------------------------------------------------------------
+	// Step 6: Wait for Monitor Digest Notification
+	// -----------------------------------------------------------------------
+	// The eval worker should generate a "monitor_digest" notification for the
+	// new threats detected in Phase 2. This is the key assertion for INT-004.
+	LogSeparator(t, "Step 6: Wait for Monitor Digest Notification")
+
+	t.Logf("  Polling notifications table for watchpoint_id=%s, event_type=monitor_digest...", wp.ID)
+	t.Logf("  Timeout: %s, Poll interval: %s",
+		env.Config.NotificationPollTimeout, env.Config.NotificationPollInterval)
+
+	notification := WaitForNotification(t, env, wp.ID, "monitor_digest")
+
+	t.Logf("  Monitor digest notification received!")
+	t.Logf("    ID:              %s", notification.ID)
+	t.Logf("    WatchPoint ID:   %s", notification.WatchPointID)
+	t.Logf("    Organization ID: %s", notification.OrganizationID)
+	t.Logf("    Event Type:      %s", notification.EventType)
+	t.Logf("    Urgency:         %s", notification.Urgency)
+	t.Logf("    Test Mode:       %v", notification.TestMode)
+	t.Logf("    Created At:      %s", notification.CreatedAt.Format(time.RFC3339))
+
+	// -----------------------------------------------------------------------
+	// Step 7: Assert Notification Properties
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "Step 7: Assert Notification Properties")
+
+	if notification.WatchPointID != wp.ID {
+		t.Fatalf("Step 7: notification.watchpoint_id = %q, want %q",
+			notification.WatchPointID, wp.ID)
+	}
+
+	if notification.OrganizationID != orgID {
+		t.Fatalf("Step 7: notification.organization_id = %q, want %q",
+			notification.OrganizationID, orgID)
+	}
+
+	if notification.EventType != "monitor_digest" {
+		t.Fatalf("Step 7: notification.event_type = %q, want %q",
+			notification.EventType, "monitor_digest")
+	}
+
+	if notification.TestMode {
+		t.Fatal("Step 7: notification.test_mode should be false for non-test WatchPoint")
+	}
+
+	t.Log("  All notification property assertions passed")
+
+	// -----------------------------------------------------------------------
+	// Step 8: Verify Notification Deliveries
+	// -----------------------------------------------------------------------
+	// The eval worker creates notification_deliveries records with status='pending'
+	// for each enabled channel configured on the WatchPoint.
+	LogSeparator(t, "Step 8: Verify Notification Deliveries")
+
+	deliveries := QueryNotificationDeliveries(t, env, notification.ID)
+
+	if len(deliveries) == 0 {
+		t.Fatal("Step 8: no notification_deliveries found for monitor_digest notification")
+	}
+
+	t.Logf("  Found %d delivery record(s):", len(deliveries))
+	for i, d := range deliveries {
+		t.Logf("    [%d] ID=%s channel=%s status=%s attempts=%d",
+			i, d.ID, d.ChannelType, d.Status, d.AttemptCount)
+	}
+
+	// Verify at least one delivery is for the email channel.
+	foundEmail := false
+	for _, d := range deliveries {
+		if d.ChannelType == "email" {
+			foundEmail = true
+			t.Logf("  Email delivery found: status=%s", d.Status)
+			break
+		}
+	}
+	if !foundEmail {
+		t.Fatal("Step 8: no email delivery record found for monitor_digest notification")
+	}
+
+	// -----------------------------------------------------------------------
+	// Step 9: Verify Evaluation State Updated (Phase 2)
+	// -----------------------------------------------------------------------
+	// After Phase 2, the evaluation state should reflect the updated forecast
+	// data. Specifically:
+	//   - last_evaluated_at should be later than the Phase 1 timestamp
+	//   - last_forecast_summary should be updated with the threat data
+	LogSeparator(t, "Step 9: Verify Evaluation State (Phase 2)")
+
+	var phase2Summary interface{}
+	var phase2EvalTime time.Time
+	err = env.Pool.QueryRow(ctx,
+		`SELECT last_forecast_summary, last_evaluated_at
+		 FROM watchpoint_evaluation_state
+		 WHERE watchpoint_id = $1`,
+		wp.ID,
+	).Scan(&phase2Summary, &phase2EvalTime)
+	if err != nil {
+		t.Fatalf("Step 9: failed to query evaluation state: %v", err)
+	}
+
+	if phase2Summary == nil {
+		t.Fatal("Step 9: last_forecast_summary is NULL after Phase 2")
+	}
+
+	if !phase2EvalTime.After(phase1EvalTime) {
+		t.Fatalf("Step 9: last_evaluated_at did not advance: Phase 1=%s, Phase 2=%s",
+			phase1EvalTime.Format(time.RFC3339), phase2EvalTime.Format(time.RFC3339))
+	}
+	t.Logf("  last_evaluated_at advanced: Phase 1=%s -> Phase 2=%s",
+		phase1EvalTime.Format(time.RFC3339), phase2EvalTime.Format(time.RFC3339))
+	t.Logf("  last_forecast_summary: populated (updated with threat data)")
+
+	// -----------------------------------------------------------------------
+	// Step 10: Verify Forecast Run Statuses
+	// -----------------------------------------------------------------------
+	// Both forecast runs should have been marked as 'complete' by the batcher.
+	LogSeparator(t, "Step 10: Verify Forecast Run Statuses")
+
+	var run1Status, run2Status string
+	err = env.Pool.QueryRow(ctx,
+		`SELECT status FROM forecast_runs WHERE id = $1`, runID1,
+	).Scan(&run1Status)
+	if err != nil {
+		t.Fatalf("Step 10: failed to query run 1 status: %v", err)
+	}
+	if run1Status != "complete" {
+		t.Fatalf("Step 10: Phase 1 forecast run status = %q, want 'complete'", run1Status)
+	}
+
+	err = env.Pool.QueryRow(ctx,
+		`SELECT status FROM forecast_runs WHERE id = $1`, runID2,
+	).Scan(&run2Status)
+	if err != nil {
+		t.Fatalf("Step 10: failed to query run 2 status: %v", err)
+	}
+	if run2Status != "complete" {
+		t.Fatalf("Step 10: Phase 2 forecast run status = %q, want 'complete'", run2Status)
+	}
+	t.Logf("  Phase 1 run: %s (status=%s)", runID1, run1Status)
+	t.Logf("  Phase 2 run: %s (status=%s)", runID2, run2Status)
+
+	// -----------------------------------------------------------------------
+	// Summary
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "INT-004 PASSED")
+	t.Logf("Monitor Mode Daily Cycle verified end-to-end:")
+	t.Logf("  Organization:      %s", orgID)
+	t.Logf("  User:              %s", userID)
+	t.Logf("  WatchPoint:        %s (tile=%s, monitor mode)", wp.ID, wp.TileID)
+	t.Logf("  Condition:         precipitation_probability > 50")
+	t.Logf("  Phase 1 (Baseline):")
+	t.Logf("    Forecast Run:    %s (safe data, precip=5%%)", runID1)
+	t.Logf("    EVAL-005:        First eval suppressed (0 notifications)")
+	t.Logf("    Summary:         Populated in evaluation state")
+	t.Logf("  Phase 2 (Change):")
+	t.Logf("    Forecast Run:    %s (threat data, precip=80%%)", runID2)
+	t.Logf("    Notification:    %s (event_type=%s)", notification.ID, notification.EventType)
+	t.Logf("    Deliveries:      %d record(s)", len(deliveries))
+}
+
 // readFileFromOffset reads a file starting from the given byte offset.
 // This allows reading only new content appended since a known position,
 // which is essential for isolating log output from a specific test run.
