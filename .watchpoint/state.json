@@ -2374,11 +2374,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "The tool successfully walks through the full checklist, validates inputs, and populates SSM. It handles the `[Skip]` option for existing keys.",
-        "status": "in_progress",
+        "status": "complete",
         "reports": [],
         "started_at": "2026-02-06T20:45:47.746378+00:00",
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "completed_at": "2026-02-06T20:55:14.086432+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
@@ -2391,9 +2391,9 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Running with `--export-env` produces a valid `.env` file usable by `docker-compose`.",
-        "status": "unprocessed",
+        "status": "in_progress",
         "reports": [],
-        "started_at": null,
+        "started_at": "2026-02-06T20:55:14.086648+00:00",
         "completed_at": null,
         "satisfaction_iterations": null,
         "skip_reason": null

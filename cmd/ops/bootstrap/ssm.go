@@ -20,6 +20,50 @@ type SSMClient interface {
 	PutParameter(ctx context.Context, params *ssm.PutParameterInput, optFns ...func(*ssm.Options)) (*ssm.PutParameterOutput, error)
 }
 
+// GetParameterValue retrieves the value of an SSM parameter. If decrypt is
+// true, SecureString parameters are decrypted before being returned. This
+// is used by the --export-env flag to read back secrets for local development.
+//
+// The path parameter must be an absolute SSM path (e.g., "/dev/watchpoint/database/url").
+// Use SSMPath() to construct it from a category/key.
+//
+// Security note: The decrypted value is returned in plaintext. The caller
+// is responsible for handling it securely (e.g., writing to a file with
+// restricted permissions, not logging it).
+func (m *SSMManager) GetParameterValue(ctx context.Context, path string, decrypt bool) (string, error) {
+	opCtx, cancel := context.WithTimeout(ctx, ssmOperationTimeout)
+	defer cancel()
+
+	output, err := m.client.GetParameter(opCtx, &ssm.GetParameterInput{
+		Name:           aws.String(path),
+		WithDecryption: aws.Bool(decrypt),
+	})
+	if err != nil {
+		return "", fmt.Errorf("reading SSM parameter %q: %w", path, err)
+	}
+
+	if output.Parameter == nil || output.Parameter.Value == nil {
+		return "", fmt.Errorf("SSM parameter %q has no value", path)
+	}
+
+	value := aws.ToString(output.Parameter.Value)
+
+	// Log retrieval without exposing the value for SecureString parameters.
+	if decrypt {
+		m.logger.Info("SSM parameter read",
+			"path", path,
+			"value_length", len(value),
+		)
+	} else {
+		m.logger.Info("SSM parameter read",
+			"path", path,
+			"value", value,
+		)
+	}
+
+	return value, nil
+}
+
 // SSMManager provides operations for managing AWS SSM Parameter Store
 // parameters during the bootstrap process. It wraps the SSM client with
 // environment-aware path construction, logging, and error handling.
