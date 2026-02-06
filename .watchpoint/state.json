@@ -670,11 +670,11 @@
           "WPLC-012"
         ],
         "definition_of_done": "Unit tests in `response_test.go` verify correct status codes and JSON structure for various error types.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T01:31:50.247029+00:00",
+        "completed_at": "2026-02-06T01:38:23.395726+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
