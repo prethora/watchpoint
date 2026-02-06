@@ -841,11 +841,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Binary compiles. Running locally with `.env` starts HTTP server. `/health` returns 200.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T02:30:16.955051+00:00",
+        "completed_at": "2026-02-06T02:34:53.419082+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       }
     ],
