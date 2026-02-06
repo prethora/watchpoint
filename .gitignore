@@ -1,0 +1,56 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# Test artifacts
+*.test
+coverage.out
+test_artifacts/
+
+# Environment files
+.env
+.env.local
+.env.cloud
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+minio_data/
+localstack_data/
+
+# AWS SAM
+.aws-sam/
+
+# Build artifacts
+samconfig.toml
+stack-outputs.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+venv/
+.venv/
+
+# Reports (generated, not source)
+reports/
+
+# Scratchpad
+scratchpad/
