@@ -1,13 +1,13 @@
 // Package main is the entry point for the WatchPoint API server.
 //
-// It initializes the configuration, creates temporary stub dependencies, builds
-// the HTTP server with the core chassis (middleware, routing, health checks),
-// and starts listening for requests.
+// It initializes the configuration, creates the database connection pool,
+// wires real repositories and services for internal dependencies, uses stub
+// implementations for external third-party services (Stripe, SendGrid, OAuth)
+// that require real API keys, and starts the HTTP server.
 //
 // In local mode (APP_ENV=local), it runs as a standard HTTP server on the
 // configured port. In Lambda mode, it will use the chiadapter to bridge API
-// Gateway events to the chi router (to be wired when the Lambda adapter
-// dependency is added).
+// Gateway events to the chi router.
 //
 // Graceful shutdown is handled via OS signal interception (SIGINT, SIGTERM).
 package main
@@ -24,11 +24,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"watchpoint/internal/api/handlers"
+	"watchpoint/internal/auth"
 	"watchpoint/internal/billing"
 	"watchpoint/internal/config"
 	"watchpoint/internal/core"
+	"watchpoint/internal/db"
+	"watchpoint/internal/external"
 	"watchpoint/internal/forecasts"
 	"watchpoint/internal/types"
 )
@@ -58,38 +62,141 @@ func run() error {
 		"port", cfg.Server.Port,
 	)
 
-	// Create temporary stub dependencies.
-	// These will be replaced with real implementations as subsequent phases
-	// deliver database repositories, auth services, etc.
-	repos := &stubRepositoryRegistry{}
-	securityService := &stubSecurityService{}
-	authenticator := &stubAuthenticator{}
-	rateLimitStore := &stubRateLimitStore{}
-	idempotencyStore := &stubIdempotencyStore{}
-	metrics := &stubMetricsCollector{}
+	// -------------------------------------------------------------------
+	// Database Connection Pool
+	// -------------------------------------------------------------------
+	pool, err := initDBPool(cfg)
+	if err != nil {
+		return fmt.Errorf("initializing database pool: %w", err)
+	}
+	defer pool.Close()
 
-	// Build the server.
+	// Verify database connectivity at startup (fail-fast).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := pool.Ping(ctx); err != nil {
+		return fmt.Errorf("database ping failed: %w", err)
+	}
+	logger.Info("database connection pool established")
+
+	// -------------------------------------------------------------------
+	// Real Repositories (backed by pgxpool)
+	// -------------------------------------------------------------------
+	userRepo := db.NewUserRepository(pool)
+	orgRepo := db.NewOrganizationRepository(pool)
+	sessionRepo := db.NewSessionRepository(pool)
+	securityRepo := db.NewSecurityRepository(pool)
+	watchpointRepo := db.NewWatchPointRepository(pool)
+	notificationRepo := db.NewNotificationRepository(pool)
+	// forecastRunRepo is available but not yet used by the API server
+	// (used by data-poller and eval-worker). Declared for reference:
+	// _ = db.NewForecastRunRepository(pool)
+	auditRepo := db.NewAuditRepository(pool)
+	apiKeyRepo := db.NewAPIKeyRepository(pool)
+	subStateRepo := db.NewSubscriptionStateRepo(pool, logger)
+	usageDBImpl := db.NewUsageDBImpl(pool)
+	usageHistoryRepo := db.NewUsageHistoryRepo(pool)
+
+	// Build a real RepositoryRegistry for core.Server.
+	repos := &pgRepositoryRegistry{
+		wpRepo:    watchpointRepo,
+		orgRepo:   orgRepo,
+		userRepo:  userRepo,
+		notifRepo: notificationRepo,
+		pool:      pool,
+	}
+
+	// -------------------------------------------------------------------
+	// Real Services (internal domain logic)
+	// -------------------------------------------------------------------
+
+	// Security Service
+	securitySvc := auth.NewSecurityService(
+		securityRepo,
+		auth.DefaultSecurityConfig(),
+		nil, // use RealClock
+		logger,
+	)
+
+	// Session Service
+	tokenGen := auth.NewCryptoTokenGenerator()
+	sessionSvc := auth.NewSessionService(
+		sessionRepo,
+		tokenGen,
+		auth.DefaultSessionConfig(),
+		nil, // use RealClock
+		logger,
+	)
+
+	// Auth Service (wrapping real service + stub for unimplemented methods)
+	txManager := &pgAuthTxManager{pool: pool}
+	realAuthSvc := auth.NewAuthService(auth.AuthServiceConfig{
+		UserRepo:       userRepo,
+		SessionService: sessionSvc,
+		Security:       securitySvc,
+		TxManager:      txManager,
+		Hasher:         nil, // use production bcryptHasher
+		Clock:          nil, // use RealClock
+		Logger:         logger,
+	})
+
+	// Plan Registry (static in-memory)
+	planRegistry := billing.NewStaticPlanRegistry()
+
+	// Usage Reporter (for billing and usage endpoints)
+	usageReporter := billing.NewUsageReporter(
+		usageDBImpl, // implements billing.OrgLookup
+		usageDBImpl, // implements billing.UsageDB
+		usageHistoryRepo,
+		planRegistry,
+	)
+
+	// -------------------------------------------------------------------
+	// External Service Stubs (require real API keys in production)
+	// -------------------------------------------------------------------
+	// These are stubbed because they interact with third-party APIs.
+	// In production, these would be replaced with real implementations
+	// using config.Billing.StripeSecretKey, config.Email.SendGridKey, etc.
+	stubBillingSvc := external.NewStubBillingService(logger)
+	stubOAuthMgr := &oauthManagerAdapter{inner: external.NewStubOAuthManager(logger, "google", "github")}
+	stubWebhookVerifier := external.NewStubWebhookVerifier(logger)
+	stubEmailProvider := external.NewStubEmailProvider(logger)
+
+	// -------------------------------------------------------------------
+	// Infrastructure Stubs (no real implementations yet)
+	// -------------------------------------------------------------------
+	// These components don't have real implementations in the codebase yet.
+	// They will be implemented in later phases.
+	stubAuthenticator := &noopAuthenticator{}
+	stubRateLimitStore := &noopRateLimitStore{}
+	stubIdempotencyStore := &noopIdempotencyStore{}
+	stubMetrics := &noopMetricsCollector{}
+
+	// -------------------------------------------------------------------
+	// Build the Server
+	// -------------------------------------------------------------------
 	srv, err := core.NewServer(cfg, repos, logger)
 	if err != nil {
 		return fmt.Errorf("creating server: %w", err)
 	}
 
-	// Inject stub dependencies that are not part of the NewServer constructor.
-	srv.SecurityService = securityService
-	srv.Authenticator = authenticator
-	srv.RateLimitStore = rateLimitStore
-	srv.IdempotencyStore = idempotencyStore
-	srv.Metrics = metrics
+	// Inject infrastructure dependencies.
+	srv.SecurityService = securitySvc
+	srv.Authenticator = stubAuthenticator
+	srv.RateLimitStore = stubRateLimitStore
+	srv.IdempotencyStore = stubIdempotencyStore
+	srv.Metrics = stubMetrics
 
-	// Wire the Auth handler with stub services.
-	// When real auth/session services are available (from Phase 5 Task 1-2),
-	// they will replace the stub auth/session services here.
-	stubAuthSvc := &stubAuthHandlerService{}
-	stubSessSvc := &stubSessionHandlerService{}
+	// -------------------------------------------------------------------
+	// Wire Handlers with Real Dependencies
+	// -------------------------------------------------------------------
+
+	// Auth Handler
+	authHandlerSvc := &authServiceAdapter{real: realAuthSvc}
 	authHandler := handlers.NewAuthHandler(
-		stubAuthSvc,
-		stubSessSvc,
-		nil, // OAuthManager - not wired yet
+		authHandlerSvc,
+		sessionSvc,
+		stubOAuthMgr,
 		handlers.DefaultCookieConfig(),
 		logger,
 		srv.Validator,
@@ -98,89 +205,115 @@ func run() error {
 		r.Route("/auth", authHandler.RegisterRoutes)
 	})
 
-	// Wire the Forecast handler with stub service.
-	// When real ForecastService/ForecastReader/ForecastRunRepository are available,
-	// they will replace this stub.
-	stubForecastSvc := &stubForecastHandlerService{}
+	// Forecast Handler (stub forecast service -- requires S3/Zarr reader)
+	stubForecastSvc := &noopForecastService{}
 	forecastHandler := handlers.NewForecastHandler(stubForecastSvc, srv.Validator, logger)
 	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, func(r chi.Router) {
 		r.Route("/forecasts", forecastHandler.RegisterRoutes)
 	})
 
-	// Wire the Billing handler with stub services.
-	// When real billing/usage services are available (from Phase 3-5),
-	// they will replace these stubs.
-	stubBillingSvc := &stubBillingHandlerService{}
-	stubOrgBillingRepo := &stubOrgBillingReader{}
-	stubUsageRep := &stubUsageReporterService{}
-	stubAudit := &stubAuditLoggerService{}
-
-	usageHandler := handlers.NewUsageHandler(stubUsageRep, stubOrgBillingRepo, srv.Validator)
+	// Billing Handler
+	billingAudit := &auditLoggerAdapter{repo: auditRepo}
+	usageHandler := handlers.NewUsageHandler(usageReporter, orgRepo, srv.Validator)
 	billingHandler := handlers.NewBillingHandler(
 		stubBillingSvc,
-		stubOrgBillingRepo,
+		orgRepo,
 		usageHandler,
-		stubAudit,
+		billingAudit,
 		cfg,
 		srv.Validator,
 		logger,
 	)
 	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, billingHandler.RegisterRoutes)
 
-	// Wire the Organization + User handlers with stub services.
-	// When real repository and service implementations are available, they will
-	// replace these stubs.
-	stubOrgRepo := &stubOrgHandlerRepo{}
-	stubOrgWPRepo := &stubOrgWatchPointRepo{}
-	stubOrgNotifRepo := &stubOrgNotificationRepo{}
-	stubOrgAuditRepo := &stubOrgAuditRepo{}
-	stubOrgUserRepo := &stubOrgUserRepo{}
-	stubOrgBillingSvc := &stubOrgBillingServiceImpl{}
-	planRegistry := billing.NewStaticPlanRegistry()
+	// Stripe Webhook Handler
+	stripeWebhookHandler := handlers.NewStripeWebhookHandler(
+		stubWebhookVerifier,
+		subStateRepo,
+		&wpResumerAdapter{repo: watchpointRepo},
+		string(cfg.Billing.StripeWebhookSecret),
+		logger,
+	)
+	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, stripeWebhookHandler.RegisterRoutes)
 
+	// Organization Handler
+	orgNotifAdapter := &orgNotifRepoAdapter{repo: notificationRepo}
+	wpPauseAdapter := &orgWPPauseAdapter{repo: watchpointRepo}
 	orgHandler := handlers.NewOrganizationHandler(
-		stubOrgRepo,
-		stubOrgWPRepo,
-		stubOrgNotifRepo,
-		stubOrgAuditRepo,
-		stubOrgUserRepo,
+		orgRepo,
+		wpPauseAdapter,
+		orgNotifAdapter,
+		auditRepo,
+		userRepo,
 		planRegistry,
-		stubOrgBillingSvc,
+		&orgBillingAdapter{svc: stubBillingSvc},
 		srv.Validator,
 		logger,
 	)
 
-	stubUserRepo := &stubUserHandlerRepo{}
-	stubUserSessionRepo := &stubUserSessionRepo{}
-	stubEmailSvc := &stubEmailServiceImpl{}
-
+	// User Handler
+	emailSvcAdapter := &emailServiceAdapter{provider: stubEmailProvider, cfg: cfg}
 	userHandler := handlers.NewUserHandler(
-		stubUserRepo,
-		stubUserSessionRepo,
-		stubEmailSvc,
-		stubAudit,
+		userRepo,
+		sessionRepo,
+		emailSvcAdapter,
+		billingAudit,
 		srv.Validator,
 		logger,
 	)
 
-	// Wire the API Key handler (already exists from previous task).
-	stubAPIKeyRepo := &stubAPIKeyHandlerRepo{}
-	apiKeyHandler := handlers.NewAPIKeyHandler(stubAPIKeyRepo, stubAudit, logger)
+	// API Key Handler
+	apiKeyRepoAdapter := &apiKeyRepoAdapter{repo: apiKeyRepo}
+	apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepoAdapter, billingAudit, logger)
 
 	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, func(r chi.Router) {
 		orgHandler.RegisterRoutes(r, userHandler, apiKeyHandler)
 	})
 
-	// Mount all routes (middleware chain + versioned endpoints + health).
+	// WatchPoint Handler
+	wpAuditAdapter := &wpAuditLoggerAdapter{repo: auditRepo}
+	wpHandler := handlers.NewWatchPointHandler(
+		watchpointRepo,
+		notificationRepo,
+		srv.Validator,
+		logger,
+		stubForecastSvc, // WPForecastProvider (GetSnapshot)
+		usageReporter,   // WPUsageEnforcer (CheckLimit)
+		wpAuditAdapter,
+		nil, // EvalTrigger -- requires SQS client, not available locally
+	)
+	srv.V1RouteRegistrars = append(srv.V1RouteRegistrars, wpHandler.RegisterRoutes)
+
+	// -------------------------------------------------------------------
+	// Mount All Routes and Start Server
+	// -------------------------------------------------------------------
 	srv.MountRoutes()
 
 	// Determine if running in Lambda mode.
-	// AWS Lambda sets AWS_LAMBDA_RUNTIME_API when executing inside the runtime.
 	if isLambdaEnvironment() {
 		return runLambda(srv, logger)
 	}
 
 	return runHTTPServer(srv, cfg, logger)
+}
+
+// initDBPool creates a pgxpool.Pool configured from the application config.
+func initDBPool(cfg *config.Config) (*pgxpool.Pool, error) {
+	poolCfg, err := pgxpool.ParseConfig(string(cfg.Database.URL))
+	if err != nil {
+		return nil, fmt.Errorf("parsing database URL: %w", err)
+	}
+
+	poolCfg.MaxConns = int32(cfg.Database.MaxConns)
+	poolCfg.MinConns = int32(cfg.Database.MinConns)
+	poolCfg.MaxConnLifetime = cfg.Database.MaxConnLifetime
+	poolCfg.HealthCheckPeriod = cfg.Database.HealthCheckPeriod
+
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating pool: %w", err)
+	}
+	return pool, nil
 }
 
 // isLambdaEnvironment returns true if the process is running inside AWS Lambda.
@@ -191,11 +324,7 @@ func isLambdaEnvironment() bool {
 }
 
 // runLambda starts the server in AWS Lambda mode using the chi adapter.
-// This is a placeholder that will be implemented when the aws-lambda-go-api-proxy
-// dependency is added.
 func runLambda(srv *core.Server, logger *slog.Logger) error {
-	// TODO: Wire chiadapter.New(srv.Handler()) and lambda.Start() when the
-	// aws-lambda-go and aws-lambda-go-api-proxy dependencies are added.
 	logger.Error("Lambda mode is not yet implemented; run with APP_ENV=local for HTTP mode")
 	return fmt.Errorf("lambda mode not yet implemented")
 }
@@ -213,9 +342,7 @@ func runHTTPServer(srv *core.Server, cfg *config.Config, logger *slog.Logger) er
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// Channel to capture server errors from ListenAndServe.
 	serverErr := make(chan error, 1)
-
 	go func() {
 		logger.Info("HTTP server listening", "addr", addr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -224,7 +351,6 @@ func runHTTPServer(srv *core.Server, cfg *config.Config, logger *slog.Logger) er
 		close(serverErr)
 	}()
 
-	// Wait for shutdown signal or server error.
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
@@ -237,7 +363,6 @@ func runHTTPServer(srv *core.Server, cfg *config.Config, logger *slog.Logger) er
 		}
 	}
 
-	// Graceful shutdown with a 10-second deadline.
 	logger.Info("initiating graceful shutdown")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -246,7 +371,6 @@ func runHTTPServer(srv *core.Server, cfg *config.Config, logger *slog.Logger) er
 		logger.Error("HTTP server shutdown error", "error", err)
 	}
 
-	// Shutdown server resources (DB pools, etc.).
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("server resource shutdown error", "error", err)
 		return fmt.Errorf("server shutdown: %w", err)
@@ -280,40 +404,256 @@ func newLogger(level string) *slog.Logger {
 }
 
 // =============================================================================
-// Temporary Stub Dependencies
-//
-// These stubs satisfy the interfaces required by core.Server until real
-// implementations are delivered in later phases. They are intentionally minimal
-// and will be removed when the real dependencies are wired.
+// Repository Registry (backed by pgxpool)
 // =============================================================================
 
-// stubRepositoryRegistry implements types.RepositoryRegistry with no-op repositories.
-type stubRepositoryRegistry struct{}
+// pgRepositoryRegistry implements types.RepositoryRegistry using real
+// PostgreSQL-backed repositories.
+type pgRepositoryRegistry struct {
+	wpRepo    *db.WatchPointRepository
+	orgRepo   *db.OrganizationRepository
+	userRepo  *db.UserRepository
+	notifRepo *db.NotificationRepository
+	pool      *pgxpool.Pool
+}
 
-func (s *stubRepositoryRegistry) WatchPoints() types.WatchPointRepository     { return &stubWatchPointRepo{} }
-func (s *stubRepositoryRegistry) Organizations() types.OrganizationRepository { return &stubOrganizationRepo{} }
-func (s *stubRepositoryRegistry) Users() types.UserRepository                 { return &stubUserRepo{} }
-func (s *stubRepositoryRegistry) Notifications() types.NotificationRepository { return &stubNotificationRepo{} }
+func (r *pgRepositoryRegistry) WatchPoints() types.WatchPointRepository     { return r.wpRepo }
+func (r *pgRepositoryRegistry) Organizations() types.OrganizationRepository { return r.orgRepo }
+func (r *pgRepositoryRegistry) Users() types.UserRepository                 { return r.userRepo }
+func (r *pgRepositoryRegistry) Notifications() types.NotificationRepository { return r.notifRepo }
 
-type stubWatchPointRepo struct{}
-type stubOrganizationRepo struct{}
-type stubUserRepo struct{}
-type stubNotificationRepo struct{}
-
-// stubSecurityService implements types.SecurityService with permissive defaults.
-type stubSecurityService struct{}
-
-func (s *stubSecurityService) RecordAttempt(_ context.Context, _, _, _ string, _ bool, _ string) error {
+// Close shuts down the underlying connection pool. Called by Server.Shutdown
+// via the interface{ Close() error } type assertion.
+func (r *pgRepositoryRegistry) Close() error {
+	r.pool.Close()
 	return nil
 }
-func (s *stubSecurityService) IsIPBlocked(_ context.Context, _ string) bool        { return false }
-func (s *stubSecurityService) IsIdentifierBlocked(_ context.Context, _ string) bool { return false }
 
-// stubAuthenticator implements core.Authenticator that returns a system actor
+// =============================================================================
+// Auth Transaction Manager (pgx-based)
+// =============================================================================
+
+// pgAuthTxManager implements auth.AuthTxManager using pgxpool transactions.
+type pgAuthTxManager struct {
+	pool *pgxpool.Pool
+}
+
+func (m *pgAuthTxManager) RunInTx(ctx context.Context, fn func(ctx context.Context, txUserRepo auth.UserRepo, txSessionRepo auth.SessionRepo) error) error {
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return types.NewAppError(types.ErrCodeInternalDB, "failed to begin transaction", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	txUserRepo := db.NewUserRepository(tx)
+	txSessionRepo := db.NewSessionRepository(tx)
+
+	if err := fn(ctx, txUserRepo, txSessionRepo); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return types.NewAppError(types.ErrCodeInternalDB, "failed to commit transaction", err)
+	}
+	return nil
+}
+
+// =============================================================================
+// Service Adapters (bridge interface mismatches)
+// =============================================================================
+
+// authServiceAdapter bridges auth.authService (Login, AcceptInvite) to the
+// handlers.AuthService interface (which also requires RequestPasswordReset,
+// CompletePasswordReset). The password reset methods return stub errors until
+// they are implemented in the auth package.
+type authServiceAdapter struct {
+	real interface {
+		Login(ctx context.Context, email, password, ip string) (*types.User, *types.Session, error)
+		AcceptInvite(ctx context.Context, token, name, password, ip string) (*types.User, *types.Session, error)
+	}
+}
+
+func (a *authServiceAdapter) Login(ctx context.Context, email, password, ip string) (*types.User, *types.Session, error) {
+	return a.real.Login(ctx, email, password, ip)
+}
+
+func (a *authServiceAdapter) AcceptInvite(ctx context.Context, token, name, password, ip string) (*types.User, *types.Session, error) {
+	return a.real.AcceptInvite(ctx, token, name, password, ip)
+}
+
+func (a *authServiceAdapter) RequestPasswordReset(_ context.Context, _ string) error {
+	// Not yet implemented in auth package. Return nil per enumeration
+	// protection: the handler should not reveal whether the email exists.
+	return nil
+}
+
+func (a *authServiceAdapter) CompletePasswordReset(_ context.Context, _, _ string) error {
+	return types.NewAppError(types.ErrCodeInternalUnexpected, "password reset not yet implemented", nil)
+}
+
+// auditLoggerAdapter bridges db.AuditRepository (takes *types.AuditEvent)
+// to handlers.AuditLogger (takes types.AuditEvent by value).
+type auditLoggerAdapter struct {
+	repo *db.AuditRepository
+}
+
+func (a *auditLoggerAdapter) Log(ctx context.Context, event types.AuditEvent) error {
+	return a.repo.Log(ctx, &event)
+}
+
+// wpAuditLoggerAdapter bridges db.AuditRepository to handlers.WPAuditLogger
+// (takes *types.AuditEvent by pointer -- matches directly).
+type wpAuditLoggerAdapter struct {
+	repo *db.AuditRepository
+}
+
+func (a *wpAuditLoggerAdapter) Log(ctx context.Context, entry *types.AuditEvent) error {
+	return a.repo.Log(ctx, entry)
+}
+
+// orgNotifRepoAdapter bridges db.NotificationRepository.List (returns
+// []*types.NotificationHistoryItem) to handlers.OrgNotificationRepo.List
+// (returns []types.NotificationHistoryItem by value).
+type orgNotifRepoAdapter struct {
+	repo *db.NotificationRepository
+}
+
+func (a *orgNotifRepoAdapter) List(ctx context.Context, filter types.NotificationFilter) ([]types.NotificationHistoryItem, types.PageInfo, error) {
+	items, pageInfo, err := a.repo.List(ctx, filter)
+	if err != nil {
+		return nil, pageInfo, err
+	}
+	// Convert []*T to []T.
+	result := make([]types.NotificationHistoryItem, len(items))
+	for i, item := range items {
+		if item != nil {
+			result[i] = *item
+		}
+	}
+	return result, pageInfo, nil
+}
+
+// orgWPPauseAdapter bridges db.WatchPointRepository.PauseAllByOrgID (takes
+// orgID and reason) to handlers.OrgWatchPointRepo.PauseAllByOrgID (takes
+// only orgID). Defaults to "org_deletion" as the pause reason.
+type orgWPPauseAdapter struct {
+	repo *db.WatchPointRepository
+}
+
+func (a *orgWPPauseAdapter) PauseAllByOrgID(ctx context.Context, orgID string) error {
+	return a.repo.PauseAllByOrgID(ctx, orgID, "org_deletion")
+}
+
+// wpResumerAdapter bridges db.WatchPointRepository.ResumeAllByOrgID (takes
+// orgID and string reason) to handlers.WatchPointResumer.ResumeAllByOrgID
+// (takes orgID and types.PausedReason).
+type wpResumerAdapter struct {
+	repo *db.WatchPointRepository
+}
+
+func (a *wpResumerAdapter) ResumeAllByOrgID(ctx context.Context, orgID string, reason types.PausedReason) error {
+	return a.repo.ResumeAllByOrgID(ctx, orgID, string(reason))
+}
+
+// apiKeyRepoAdapter bridges db.APIKeyRepository to handlers.APIKeyRepo.
+// The only difference is the List method parameter type (db.ListAPIKeysParams
+// vs handlers.APIKeyListParams -- same fields, different types).
+type apiKeyRepoAdapter struct {
+	repo *db.APIKeyRepository
+}
+
+func (a *apiKeyRepoAdapter) List(ctx context.Context, orgID string, params handlers.APIKeyListParams) ([]*types.APIKey, error) {
+	return a.repo.List(ctx, orgID, db.ListAPIKeysParams{
+		ActiveOnly: params.ActiveOnly,
+		Prefix:     params.Prefix,
+		Limit:      params.Limit,
+		Cursor:     params.Cursor,
+	})
+}
+
+func (a *apiKeyRepoAdapter) Create(ctx context.Context, key *types.APIKey) error {
+	return a.repo.Create(ctx, key)
+}
+
+func (a *apiKeyRepoAdapter) GetByID(ctx context.Context, id string, orgID string) (*types.APIKey, error) {
+	return a.repo.GetByID(ctx, id, orgID)
+}
+
+func (a *apiKeyRepoAdapter) Delete(ctx context.Context, id string, orgID string) error {
+	return a.repo.Delete(ctx, id, orgID)
+}
+
+func (a *apiKeyRepoAdapter) Rotate(ctx context.Context, oldKeyID string, orgID string, newKey *types.APIKey, graceEnd time.Time) error {
+	return a.repo.Rotate(ctx, oldKeyID, orgID, newKey, graceEnd)
+}
+
+func (a *apiKeyRepoAdapter) CountRecentByUser(ctx context.Context, userID string, since time.Time) (int, error) {
+	return a.repo.CountRecentByUser(ctx, userID, since)
+}
+
+// emailServiceAdapter bridges external.EmailProvider to handlers.UserEmailService.
+// The invite flow needs to construct an invite URL and send an email.
+type emailServiceAdapter struct {
+	provider external.EmailProvider
+	cfg      *config.Config
+}
+
+func (a *emailServiceAdapter) SendInvite(ctx context.Context, toEmail string, inviteURL string, role types.UserRole) error {
+	_, err := a.provider.Send(ctx, types.SendInput{
+		To:         toEmail,
+		TemplateID: "invite",
+		From: types.SenderIdentity{
+			Address: "noreply@watchpoint.io",
+			Name:    "WatchPoint",
+		},
+		TemplateData: map[string]interface{}{
+			"invite_url": inviteURL,
+			"role":       string(role),
+		},
+		ReferenceID: fmt.Sprintf("invite_%s", toEmail),
+	})
+	return err
+}
+
+// oauthManagerAdapter bridges external.OAuthManager (returns external.OAuthProvider)
+// to handlers.OAuthManager (returns handlers.OAuthProvider). Both interfaces
+// have the same methods, but Go's type system treats them as distinct.
+type oauthManagerAdapter struct {
+	inner external.OAuthManager
+}
+
+func (a *oauthManagerAdapter) GetProvider(name string) (handlers.OAuthProvider, error) {
+	return a.inner.GetProvider(name)
+}
+
+// orgBillingAdapter bridges external.BillingService (which has EnsureCustomer
+// but not CancelSubscription) to handlers.OrgBillingService (which needs both).
+type orgBillingAdapter struct {
+	svc external.BillingService
+}
+
+func (a *orgBillingAdapter) EnsureCustomer(ctx context.Context, orgID string, email string) (string, error) {
+	return a.svc.EnsureCustomer(ctx, orgID, email)
+}
+
+func (a *orgBillingAdapter) CancelSubscription(_ context.Context, _ string) error {
+	// Not yet implemented. In production, this would call Stripe to cancel.
+	// For now, return nil as a no-op.
+	return nil
+}
+
+// =============================================================================
+// Infrastructure Stubs (no real implementations yet)
+//
+// These satisfy interfaces for components that don't have concrete
+// implementations in this phase. They will be replaced in later phases.
+// =============================================================================
+
+// noopAuthenticator implements core.Authenticator that returns a system actor
 // for any token, allowing the server to start without real auth infrastructure.
-type stubAuthenticator struct{}
+type noopAuthenticator struct{}
 
-func (s *stubAuthenticator) ResolveToken(_ context.Context, _ string) (*types.Actor, error) {
+func (s *noopAuthenticator) ResolveToken(_ context.Context, _ string) (*types.Actor, error) {
 	return &types.Actor{
 		ID:             "system_stub",
 		Type:           types.ActorTypeSystem,
@@ -322,10 +662,10 @@ func (s *stubAuthenticator) ResolveToken(_ context.Context, _ string) (*types.Ac
 	}, nil
 }
 
-// stubRateLimitStore implements core.RateLimitStore that always allows requests.
-type stubRateLimitStore struct{}
+// noopRateLimitStore implements core.RateLimitStore that always allows requests.
+type noopRateLimitStore struct{}
 
-func (s *stubRateLimitStore) IncrementAndCheck(_ context.Context, _ string, _ int, _ time.Duration) (core.RateLimitResult, error) {
+func (s *noopRateLimitStore) IncrementAndCheck(_ context.Context, _ string, _ int, _ time.Duration) (core.RateLimitResult, error) {
 	return core.RateLimitResult{
 		Allowed:   true,
 		Remaining: 1000,
@@ -333,262 +673,70 @@ func (s *stubRateLimitStore) IncrementAndCheck(_ context.Context, _ string, _ in
 	}, nil
 }
 
-// stubIdempotencyStore implements core.IdempotencyStore with no persistence.
-type stubIdempotencyStore struct{}
+// noopIdempotencyStore implements core.IdempotencyStore with no persistence.
+type noopIdempotencyStore struct{}
 
-func (s *stubIdempotencyStore) Get(_ context.Context, _ string, _ string) (*core.IdempotencyRecord, error) {
+func (s *noopIdempotencyStore) Get(_ context.Context, _ string, _ string) (*core.IdempotencyRecord, error) {
 	return nil, nil
 }
-func (s *stubIdempotencyStore) Create(_ context.Context, _, _, _ string) error        { return nil }
-func (s *stubIdempotencyStore) Complete(_ context.Context, _, _ string, _ int, _ []byte) error { return nil }
-func (s *stubIdempotencyStore) Fail(_ context.Context, _, _ string) error             { return nil }
+func (s *noopIdempotencyStore) Create(_ context.Context, _, _, _ string) error        { return nil }
+func (s *noopIdempotencyStore) Complete(_ context.Context, _, _ string, _ int, _ []byte) error { return nil }
+func (s *noopIdempotencyStore) Fail(_ context.Context, _, _ string) error             { return nil }
 
-// stubMetricsCollector implements core.MetricsCollector with no-op recording.
-type stubMetricsCollector struct{}
+// noopMetricsCollector implements core.MetricsCollector with no-op recording.
+type noopMetricsCollector struct{}
 
-func (s *stubMetricsCollector) RecordRequest(_, _, _ string, _ time.Duration) {}
+func (s *noopMetricsCollector) RecordRequest(_, _, _ string, _ time.Duration) {}
 
-// stubAuthHandlerService implements handlers.AuthService with error responses.
-// This stub returns ErrCodeInternalUnexpected for all operations, indicating that
-// real auth service implementations need to be wired. It allows the server to start
-// and serve requests while returning meaningful errors.
-type stubAuthHandlerService struct{}
+// noopForecastService implements handlers.ForecastServiceInterface with error
+// responses. The real ForecastService requires an S3 client and Zarr reader
+// which are not available in local mode.
+type noopForecastService struct{}
 
-func (s *stubAuthHandlerService) Login(_ context.Context, _, _, _ string) (*types.User, *types.Session, error) {
-	return nil, nil, types.NewAppError(types.ErrCodeAuthInvalidCreds, "auth service not configured", nil)
+func (s *noopForecastService) GetPointForecast(_ context.Context, _, _ float64, _, _ time.Time) (*forecasts.ForecastResponse, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
 }
 
-func (s *stubAuthHandlerService) AcceptInvite(_ context.Context, _, _, _, _ string) (*types.User, *types.Session, error) {
-	return nil, nil, types.NewAppError(types.ErrCodeInternalUnexpected, "auth service not configured", nil)
+func (s *noopForecastService) GetBatchForecast(_ context.Context, _ forecasts.BatchForecastRequest) (*forecasts.BatchForecastResult, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
 }
 
-func (s *stubAuthHandlerService) RequestPasswordReset(_ context.Context, _ string) error {
-	return nil // Swallowed by handler per enumeration protection
+func (s *noopForecastService) GetVariables(_ context.Context) ([]forecasts.VariableResponseMetadata, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
 }
 
-func (s *stubAuthHandlerService) CompletePasswordReset(_ context.Context, _, _ string) error {
-	return types.NewAppError(types.ErrCodeInternalUnexpected, "auth service not configured", nil)
+func (s *noopForecastService) GetStatus(_ context.Context) (*forecasts.SystemStatus, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
 }
 
-// stubSessionHandlerService implements handlers.SessionService with no-op behavior.
-type stubSessionHandlerService struct{}
-
-func (s *stubSessionHandlerService) InvalidateSession(_ context.Context, _ string) error {
-	return nil
+func (s *noopForecastService) GetSnapshot(_ context.Context, _, _ float64) (*types.ForecastSnapshot, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
 }
 
-// stubBillingHandlerService implements handlers.BillingService with error responses.
-type stubBillingHandlerService struct{}
-
-func (s *stubBillingHandlerService) EnsureCustomer(_ context.Context, _, _ string) (string, error) {
-	return "", types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
-}
-
-func (s *stubBillingHandlerService) CreateCheckoutSession(_ context.Context, _ string, _ types.PlanTier, _ types.RedirectURLs) (string, string, error) {
-	return "", "", types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
-}
-
-func (s *stubBillingHandlerService) CreatePortalSession(_ context.Context, _, _ string) (string, error) {
-	return "", types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
-}
-
-func (s *stubBillingHandlerService) GetInvoices(_ context.Context, _ string, _ types.ListInvoicesParams) ([]*types.Invoice, types.PageInfo, error) {
-	return nil, types.PageInfo{}, types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
-}
-
-func (s *stubBillingHandlerService) GetSubscription(_ context.Context, _ string) (*types.SubscriptionDetails, error) {
-	return nil, types.NewAppError(types.ErrCodeInternalUnexpected, "billing service not configured", nil)
-}
-
-// stubOrgBillingReader implements handlers.OrgBillingReader with error responses.
-type stubOrgBillingReader struct{}
-
-func (s *stubOrgBillingReader) GetByID(_ context.Context, orgID string) (*types.Organization, error) {
-	return &types.Organization{
-		ID:           orgID,
-		Name:         "Stub Organization",
-		BillingEmail: "stub@example.com",
-		Plan:         types.PlanFree,
-	}, nil
-}
-
-// stubUsageReporterService implements handlers.UsageReporter with error responses.
-type stubUsageReporterService struct{}
-
-func (s *stubUsageReporterService) GetCurrentUsage(_ context.Context, _ string) (*types.UsageSnapshot, error) {
-	return nil, types.NewAppError(types.ErrCodeInternalUnexpected, "usage reporter not configured", nil)
-}
-
-func (s *stubUsageReporterService) GetUsageHistory(_ context.Context, _ string, _, _ time.Time, _ types.TimeGranularity) ([]*types.UsageDataPoint, error) {
-	return nil, types.NewAppError(types.ErrCodeInternalUnexpected, "usage reporter not configured", nil)
-}
-
-// stubAuditLoggerService implements handlers.AuditLogger with no-op behavior.
-type stubAuditLoggerService struct{}
-
-func (s *stubAuditLoggerService) Log(_ context.Context, _ types.AuditEvent) error {
-	return nil
+func (s *noopForecastService) GetVerificationMetrics(_ context.Context, _ string, _, _ time.Time) (*forecasts.VerificationReport, error) {
+	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
 }
 
 // =============================================================================
-// Stub Dependencies for Organization & User Handlers
+// Compile-time Interface Assertions
 // =============================================================================
 
-// stubOrgHandlerRepo implements handlers.OrgRepo with stub responses.
-type stubOrgHandlerRepo struct{}
-
-func (s *stubOrgHandlerRepo) GetByID(_ context.Context, _ string) (*types.Organization, error) {
-	return nil, types.NewAppError(types.ErrCodeNotFoundOrg, "organization service not configured", nil)
-}
-func (s *stubOrgHandlerRepo) Create(_ context.Context, _ *types.Organization) error { return nil }
-func (s *stubOrgHandlerRepo) Update(_ context.Context, _ *types.Organization) error { return nil }
-func (s *stubOrgHandlerRepo) Delete(_ context.Context, _ string) error              { return nil }
-
-// stubOrgWatchPointRepo implements handlers.OrgWatchPointRepo with no-op.
-type stubOrgWatchPointRepo struct{}
-
-func (s *stubOrgWatchPointRepo) PauseAllByOrgID(_ context.Context, _ string) error { return nil }
-
-// stubOrgNotificationRepo implements handlers.OrgNotificationRepo with empty results.
-type stubOrgNotificationRepo struct{}
-
-func (s *stubOrgNotificationRepo) List(_ context.Context, _ types.NotificationFilter) ([]types.NotificationHistoryItem, types.PageInfo, error) {
-	return nil, types.PageInfo{}, nil
-}
-
-// stubOrgAuditRepo implements handlers.OrgAuditRepo with no-op behavior.
-type stubOrgAuditRepo struct{}
-
-func (s *stubOrgAuditRepo) Log(_ context.Context, _ *types.AuditEvent) error { return nil }
-func (s *stubOrgAuditRepo) List(_ context.Context, _ types.AuditQueryFilters) ([]*types.AuditEvent, types.PageInfo, error) {
-	return nil, types.PageInfo{}, nil
-}
-
-// stubOrgUserRepo implements handlers.OrgUserRepo with no-op behavior.
-type stubOrgUserRepo struct{}
-
-func (s *stubOrgUserRepo) CreateWithProvider(_ context.Context, _ *types.User) error { return nil }
-
-// stubOrgBillingServiceImpl implements handlers.OrgBillingService with no-op behavior.
-type stubOrgBillingServiceImpl struct{}
-
-func (s *stubOrgBillingServiceImpl) EnsureCustomer(_ context.Context, _, _ string) (string, error) {
-	return "", nil
-}
-func (s *stubOrgBillingServiceImpl) CancelSubscription(_ context.Context, _ string) error {
-	return nil
-}
-
-// stubUserHandlerRepo implements handlers.UserRepo with stub responses.
-type stubUserHandlerRepo struct{}
-
-func (s *stubUserHandlerRepo) GetByID(_ context.Context, _, _ string) (*types.User, error) {
-	return nil, types.NewAppError(types.ErrCodeNotFoundUser, "user service not configured", nil)
-}
-func (s *stubUserHandlerRepo) GetByEmail(_ context.Context, _ string) (*types.User, error) {
-	return nil, types.NewAppError(types.ErrCodeNotFoundUser, "user service not configured", nil)
-}
-func (s *stubUserHandlerRepo) Update(_ context.Context, _ *types.User) error { return nil }
-func (s *stubUserHandlerRepo) Delete(_ context.Context, _, _ string) error   { return nil }
-func (s *stubUserHandlerRepo) CountOwners(_ context.Context, _ string) (int, error) {
-	return 1, nil
-}
-func (s *stubUserHandlerRepo) CreateInvited(_ context.Context, _ *types.User, _ string, _ time.Time) error {
-	return nil
-}
-func (s *stubUserHandlerRepo) UpdateInviteToken(_ context.Context, _, _ string, _ time.Time) error {
-	return nil
-}
-func (s *stubUserHandlerRepo) ListByOrg(_ context.Context, _ string, _ *types.UserRole, _ int, _ string) ([]*types.User, error) {
-	return nil, nil
-}
-
-// stubUserSessionRepo implements handlers.UserSessionRepo with no-op behavior.
-type stubUserSessionRepo struct{}
-
-func (s *stubUserSessionRepo) DeleteByUser(_ context.Context, _ string) error { return nil }
-
-// stubEmailServiceImpl implements handlers.UserEmailService with no-op behavior.
-type stubEmailServiceImpl struct{}
-
-func (s *stubEmailServiceImpl) SendInvite(_ context.Context, _, _ string, _ types.UserRole) error {
-	return nil
-}
-
-// stubAPIKeyHandlerRepo implements handlers.APIKeyRepo with stub responses.
-type stubAPIKeyHandlerRepo struct{}
-
-func (s *stubAPIKeyHandlerRepo) List(_ context.Context, _ string, _ handlers.APIKeyListParams) ([]*types.APIKey, error) {
-	return nil, nil
-}
-func (s *stubAPIKeyHandlerRepo) Create(_ context.Context, _ *types.APIKey) error { return nil }
-func (s *stubAPIKeyHandlerRepo) GetByID(_ context.Context, _, _ string) (*types.APIKey, error) {
-	return nil, types.NewAppError(types.ErrCodeNotFoundAPIKey, "not found", nil)
-}
-func (s *stubAPIKeyHandlerRepo) Delete(_ context.Context, _, _ string) error { return nil }
-func (s *stubAPIKeyHandlerRepo) Rotate(_ context.Context, _, _ string, _ *types.APIKey, _ time.Time) error {
-	return nil
-}
-func (s *stubAPIKeyHandlerRepo) CountRecentByUser(_ context.Context, _ string, _ time.Time) (int, error) {
-	return 0, nil
-}
-
-// stubForecastHandlerService implements handlers.ForecastServiceInterface with error responses.
-// This stub returns ErrCodeUpstreamForecast for all operations until the real
-// ForecastService is wired with ForecastReader and ForecastRunRepository.
-type stubForecastHandlerService struct{}
-
-func (s *stubForecastHandlerService) GetPointForecast(_ context.Context, _, _ float64, _, _ time.Time) (*forecasts.ForecastResponse, error) {
-	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
-}
-
-func (s *stubForecastHandlerService) GetBatchForecast(_ context.Context, _ forecasts.BatchForecastRequest) (*forecasts.BatchForecastResult, error) {
-	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
-}
-
-func (s *stubForecastHandlerService) GetVariables(_ context.Context) ([]forecasts.VariableResponseMetadata, error) {
-	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
-}
-
-func (s *stubForecastHandlerService) GetStatus(_ context.Context) (*forecasts.SystemStatus, error) {
-	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
-}
-
-func (s *stubForecastHandlerService) GetSnapshot(_ context.Context, _, _ float64) (*types.ForecastSnapshot, error) {
-	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
-}
-
-func (s *stubForecastHandlerService) GetVerificationMetrics(_ context.Context, _ string, _, _ time.Time) (*forecasts.VerificationReport, error) {
-	return nil, types.NewAppError(types.ErrCodeUpstreamForecast, "forecast service not configured", nil)
-}
-
-// Compile-time interface assertions to ensure stubs satisfy their contracts.
 var (
-	_ types.RepositoryRegistry  = (*stubRepositoryRegistry)(nil)
-	_ types.SecurityService     = (*stubSecurityService)(nil)
-	_ core.Authenticator        = (*stubAuthenticator)(nil)
-	_ core.RateLimitStore       = (*stubRateLimitStore)(nil)
-	_ core.IdempotencyStore     = (*stubIdempotencyStore)(nil)
-	_ core.MetricsCollector     = (*stubMetricsCollector)(nil)
-	_ handlers.AuthService      = (*stubAuthHandlerService)(nil)
-	_ handlers.SessionService   = (*stubSessionHandlerService)(nil)
-	_ handlers.BillingService   = (*stubBillingHandlerService)(nil)
-	_ handlers.OrgBillingReader = (*stubOrgBillingReader)(nil)
-	_ handlers.UsageReporter    = (*stubUsageReporterService)(nil)
-	_ handlers.AuditLogger      = (*stubAuditLoggerService)(nil)
-
-	// Organization & User handler stubs
-	_ handlers.OrgRepo              = (*stubOrgHandlerRepo)(nil)
-	_ handlers.OrgWatchPointRepo    = (*stubOrgWatchPointRepo)(nil)
-	_ handlers.OrgNotificationRepo  = (*stubOrgNotificationRepo)(nil)
-	_ handlers.OrgAuditRepo         = (*stubOrgAuditRepo)(nil)
-	_ handlers.OrgUserRepo          = (*stubOrgUserRepo)(nil)
-	_ handlers.OrgBillingService    = (*stubOrgBillingServiceImpl)(nil)
-	_ handlers.UserRepo             = (*stubUserHandlerRepo)(nil)
-	_ handlers.UserSessionRepo      = (*stubUserSessionRepo)(nil)
-	_ handlers.UserEmailService     = (*stubEmailServiceImpl)(nil)
-	_ handlers.APIKeyRepo           = (*stubAPIKeyHandlerRepo)(nil)
-
-	// Forecast handler stub
-	_ handlers.ForecastServiceInterface = (*stubForecastHandlerService)(nil)
+	_ types.RepositoryRegistry = (*pgRepositoryRegistry)(nil)
+	_ auth.AuthTxManager       = (*pgAuthTxManager)(nil)
+	_ core.Authenticator       = (*noopAuthenticator)(nil)
+	_ core.RateLimitStore      = (*noopRateLimitStore)(nil)
+	_ core.IdempotencyStore    = (*noopIdempotencyStore)(nil)
+	_ core.MetricsCollector    = (*noopMetricsCollector)(nil)
+	_ handlers.AuthService     = (*authServiceAdapter)(nil)
+	_ handlers.AuditLogger     = (*auditLoggerAdapter)(nil)
+	_ handlers.WPAuditLogger   = (*wpAuditLoggerAdapter)(nil)
+	_ handlers.OrgNotificationRepo = (*orgNotifRepoAdapter)(nil)
+	_ handlers.OrgWatchPointRepo   = (*orgWPPauseAdapter)(nil)
+	_ handlers.WatchPointResumer   = (*wpResumerAdapter)(nil)
+	_ handlers.APIKeyRepo          = (*apiKeyRepoAdapter)(nil)
+	_ handlers.UserEmailService    = (*emailServiceAdapter)(nil)
+	_ handlers.OAuthManager        = (*oauthManagerAdapter)(nil)
+	_ handlers.OrgBillingService   = (*orgBillingAdapter)(nil)
+	_ handlers.ForecastServiceInterface = (*noopForecastService)(nil)
 )

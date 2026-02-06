@@ -1240,11 +1240,11 @@
           "INT-001"
         ],
         "definition_of_done": "`go test -v test/api_integration_test.go` passes against the running docker environment.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T09:23:07.857837+00:00",
+        "completed_at": "2026-02-06T09:39:08.144573+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       }
     ],

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -10,12 +11,22 @@ import (
 
 	"watchpoint/internal/config"
 	"watchpoint/internal/core"
+	"watchpoint/internal/types"
 )
 
-// TestHealthEndpoint verifies that the fully wired server responds with 200
-// on GET /health when all stub dependencies are in place.
-func TestHealthEndpoint(t *testing.T) {
-	// Set required environment variables for config loading.
+// testRepositoryRegistry implements types.RepositoryRegistry with nil
+// repositories for tests that only exercise infrastructure routes (health,
+// openapi) and don't hit domain handlers.
+type testRepositoryRegistry struct{}
+
+func (r *testRepositoryRegistry) WatchPoints() types.WatchPointRepository     { return nil }
+func (r *testRepositoryRegistry) Organizations() types.OrganizationRepository { return nil }
+func (r *testRepositoryRegistry) Users() types.UserRepository                 { return nil }
+func (r *testRepositoryRegistry) Notifications() types.NotificationRepository { return nil }
+
+// buildTestServer creates a minimal server for health/openapi endpoint tests.
+func buildTestServer(t *testing.T) *core.Server {
+	t.Helper()
 	setTestEnv(t)
 
 	cfg, err := config.LoadConfig(nil)
@@ -25,21 +36,36 @@ func TestHealthEndpoint(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	srv, err := core.NewServer(cfg, &stubRepositoryRegistry{}, logger)
+	srv, err := core.NewServer(cfg, &testRepositoryRegistry{}, logger)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
 
-	// Wire stub dependencies.
-	srv.SecurityService = &stubSecurityService{}
-	srv.Authenticator = &stubAuthenticator{}
-	srv.RateLimitStore = &stubRateLimitStore{}
-	srv.IdempotencyStore = &stubIdempotencyStore{}
-	srv.Metrics = &stubMetricsCollector{}
+	// Wire infrastructure stubs (same types used by production main.go).
+	srv.SecurityService = &noopSecurityService{}
+	srv.Authenticator = &noopAuthenticator{}
+	srv.RateLimitStore = &noopRateLimitStore{}
+	srv.IdempotencyStore = &noopIdempotencyStore{}
+	srv.Metrics = &noopMetricsCollector{}
 
 	srv.MountRoutes()
+	return srv
+}
 
-	// Issue a GET /health request.
+// noopSecurityService is a test-only stub for types.SecurityService.
+type noopSecurityService struct{}
+
+func (s *noopSecurityService) RecordAttempt(_ context.Context, _, _, _ string, _ bool, _ string) error {
+	return nil
+}
+func (s *noopSecurityService) IsIPBlocked(_ context.Context, _ string) bool        { return false }
+func (s *noopSecurityService) IsIdentifierBlocked(_ context.Context, _ string) bool { return false }
+
+// TestHealthEndpoint verifies that the fully wired server responds with 200
+// on GET /health when all stub dependencies are in place.
+func TestHealthEndpoint(t *testing.T) {
+	srv := buildTestServer(t)
+
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -48,7 +74,6 @@ func TestHealthEndpoint(t *testing.T) {
 		t.Errorf("GET /health: got status %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	// Verify the response body contains a healthy status.
 	var resp map[string]interface{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
@@ -60,27 +85,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 // TestOpenAPIEndpoint verifies that the OpenAPI spec placeholder returns 200.
 func TestOpenAPIEndpoint(t *testing.T) {
-	setTestEnv(t)
-
-	cfg, err := config.LoadConfig(nil)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-
-	srv, err := core.NewServer(cfg, &stubRepositoryRegistry{}, logger)
-	if err != nil {
-		t.Fatalf("NewServer: %v", err)
-	}
-
-	srv.SecurityService = &stubSecurityService{}
-	srv.Authenticator = &stubAuthenticator{}
-	srv.RateLimitStore = &stubRateLimitStore{}
-	srv.IdempotencyStore = &stubIdempotencyStore{}
-	srv.Metrics = &stubMetricsCollector{}
-
-	srv.MountRoutes()
+	srv := buildTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
 	rec := httptest.NewRecorder()
@@ -93,7 +98,6 @@ func TestOpenAPIEndpoint(t *testing.T) {
 
 // TestIsLambdaEnvironment verifies Lambda environment detection logic.
 func TestIsLambdaEnvironment(t *testing.T) {
-	// Ensure the env vars are not set.
 	os.Unsetenv("AWS_LAMBDA_RUNTIME_API")
 	os.Unsetenv("_LAMBDA_SERVER_PORT")
 
