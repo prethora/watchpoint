@@ -2462,6 +2462,24 @@
         "skip_reason": null
       },
       {
+        "task": "Implement Model Weight Upload Script",
+        "actor": "AI",
+        "description": "Create `scripts/upload-weights.sh`. This script bridges the gap between local model files and the cloud environment. \n\nLogic:\n1. Accept arguments `--bucket`, `--atlas`, `--nowcast`, and optional `--mock`.\n2. If `--mock` is set, generate large dummy files (100MB) using `dd` to simulate model weights.\n3. Upload the files to `s3://{bucket}/weights/atlas.pt` and `s3://{bucket}/weights/stormscope.pt`.\n4. Ensure the bucket provided matches the Artifact Bucket created in the previous task.\n\nThis script is required for the Human Setup phase.",
+        "priority": "High",
+        "relevant_files": [
+          "13-human-setup.md (Phase 4)",
+          "11-runpod.md (Section 6.2)"
+        ],
+        "relevant_flows": [],
+        "definition_of_done": "Script exists. Running with `--mock` successfully populates the target S3 bucket with dummy weight files.",
+        "status": "unprocessed",
+        "reports": [],
+        "started_at": null,
+        "completed_at": null,
+        "satisfaction_iterations": null,
+        "skip_reason": null
+      },
+      {
         "task": "Implement ECR Bootstrap Script",
         "actor": "AI",
         "description": "Create `scripts/bootstrap-ecr.sh`. This script resolves the Chicken-and-Egg dependency for container deployments. It must check if the ECR repository defined in `04-sam-template.md` (e.g., `watchpoint/eval-worker`) exists. If not, create it via `aws ecr create-repository`. It should output the Repository URI (e.g., `123.dkr.ecr...`). This ensures `sam build` has a valid target for container images.",

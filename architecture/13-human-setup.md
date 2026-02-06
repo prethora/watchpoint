@@ -189,7 +189,21 @@ Ask the user to paste the CloudFormation Outputs:
 > 2. `docker build -t {EvalWorkerRepositoryUri}:latest -f runpod/Dockerfile .`
 > 3. `docker push {EvalWorkerRepositoryUri}:latest`"
 
-### 6.2 Create Endpoint
+### 6.2 Model Weight Sideloading (The "Cold Start" Fix)
+**Context**: The inference worker requires massive model weights (~50GB) that are not baked into the Docker image. We must stage them in S3 so the worker can download them on startup.
+
+**Prompt**:
+> "⚠️ **Manual Action Required: Model Weights**
+> 1. Log in to [NVIDIA NGC](https://catalog.ngc.nvidia.com/) (or your model source).
+> 2. Download the `.pt` or `.onnx` files for **Atlas** and **StormScope**.
+> 3. **Action**: Run the helper script to upload them to your artifact bucket:
+>    `./scripts/upload-weights.sh --bucket {ArtifactBucketName} --atlas /path/to/atlas.pt --nowcast /path/to/stormscope.pt`
+>
+> *Note: If you do not have the real weights yet, the script can generate dummy weights for testing if you pass `--mock`.*"
+
+**Validation**: Check `aws s3 ls s3://{ArtifactBucketName}/weights/` contains the files.
+
+### 6.3 Create Endpoint
 **Prompt**:
 > "1. Go to RunPod > Serverless > New Endpoint.
 > 2. Image: `{EvalWorkerRepositoryUri}:latest`
@@ -200,7 +214,7 @@ Ask the user to paste the CloudFormation Outputs:
 
 **Validation**: Regex `^[a-zA-Z0-9-]{10,}$`
 
-### 6.3 Update Config
+### 6.4 Update Config
 **Action**:
 1.  Update CloudFormation Parameter `RunPodEndpointId` (via `sam deploy` or SSM override if architecture permits).
     *   *Decision*: We map `RunPodEndpointId` to an SSM parameter `/{env}/watchpoint/forecast/runpod_endpoint_id` to avoid redeploying the stack.
