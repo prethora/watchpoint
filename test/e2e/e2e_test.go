@@ -21,10 +21,14 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // env is the shared test environment initialized in TestMain.
@@ -171,4 +175,341 @@ func TestE2EHelperCompilation(t *testing.T) {
 			t.Fatalf("AuthenticatedRequest: expected 'Bearer e2e-local-token', got %q", req.Header.Get("Authorization"))
 		}
 	})
+}
+
+// ==========================================================================
+// INT-001: New User to First Alert (The "Happy Path")
+// ==========================================================================
+//
+// This test exercises the complete end-to-end pipeline for the most common
+// scenario: a new user creates an Event Mode WatchPoint with a precipitation
+// threshold, a forecast is generated that exceeds the threshold, and the user
+// receives a notification.
+//
+// Pipeline:
+//
+//	DB (org+user+wp) -> Seeder (Zarr in MinIO) -> Batcher (SQS dispatch)
+//	  -> EvalWorker (SQS poll -> evaluate -> DB + notification SQS)
+//	  -> DB (notifications + deliveries)
+//
+// The test verifies:
+//  1. WatchPoint is created with correct tile assignment.
+//  2. Batcher successfully queries the DB and dispatches to SQS.
+//  3. EvalWorker evaluates the condition and determines it is triggered.
+//  4. A notification record is created in the database.
+//  5. Notification deliveries are created for the configured channel.
+//
+// Architecture reference: flow-simulations.md INT-001
+// Scenario config: scripts/scenarios/int001_precip_trigger.json
+
+func TestHappyPath_EventMode(t *testing.T) {
+	if env == nil {
+		t.Fatal("test environment not initialized")
+	}
+
+	LogSeparator(t, "INT-001: Happy Path (Event Mode)")
+
+	// -----------------------------------------------------------------------
+	// Step 0: Clean up any residual data from prior runs
+	// -----------------------------------------------------------------------
+	t.Log("Step 0: Cleaning up test data from prior runs...")
+	env.CleanupTestData(t)
+
+	ctx := context.Background()
+
+	// -----------------------------------------------------------------------
+	// Step 1: Create Organization and User directly in DB
+	// -----------------------------------------------------------------------
+	// We bypass the API signup flow and insert directly to avoid depending on
+	// the full auth pipeline. This matches the INT-001 flow where the user
+	// has already signed up.
+	LogSeparator(t, "Step 1: Create Organization & User")
+
+	orgID := "org_" + uuid.New().String()
+	userID := "user_" + uuid.New().String()
+	orgEmail := fmt.Sprintf("int001-%s@example.com", uuid.New().String()[:8])
+
+	// Insert organization
+	_, err := env.Pool.Exec(ctx,
+		`INSERT INTO organizations (id, name, billing_email, plan, plan_limits, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+		orgID,
+		"INT-001 Test Org",
+		orgEmail,
+		"free",
+		`{"watchpoints_max": 100, "api_calls_max": 10000, "notifications_max": 1000}`,
+	)
+	if err != nil {
+		t.Fatalf("Step 1: failed to insert organization: %v", err)
+	}
+	t.Logf("  Organization created: %s", orgID)
+
+	// Insert user (owner)
+	_, err = env.Pool.Exec(ctx,
+		`INSERT INTO users (id, organization_id, email, role, created_at)
+		 VALUES ($1, $2, $3, $4, NOW())`,
+		userID,
+		orgID,
+		orgEmail,
+		"owner",
+	)
+	if err != nil {
+		t.Fatalf("Step 1: failed to insert user: %v", err)
+	}
+	t.Logf("  User created: %s", userID)
+
+	// -----------------------------------------------------------------------
+	// Step 2: Create Event Mode WatchPoint via direct DB insert
+	// -----------------------------------------------------------------------
+	// Location: lat=40.0, lon=-74.0 (matches INT-001 scenario config)
+	// Condition: precipitation_probability > 50% (threshold below the 80%
+	//   value that the scenario will inject, ensuring the trigger fires)
+	// Channel: email (with a test address)
+	LogSeparator(t, "Step 2: Create WatchPoint (Event Mode)")
+
+	// Time window: now to 48 hours from now (ensures the WP is active)
+	now := time.Now().UTC()
+	windowStart := now.Add(-1 * time.Hour)  // Started 1 hour ago
+	windowEnd := now.Add(48 * time.Hour)    // Ends in 48 hours
+
+	conditions := []map[string]interface{}{
+		{
+			"variable":  "precipitation_probability",
+			"operator":  ">",
+			"threshold": 50.0,
+		},
+	}
+
+	channels := []map[string]interface{}{
+		{
+			"type":    "email",
+			"config":  map[string]interface{}{"address": orgEmail},
+			"enabled": true,
+		},
+	}
+
+	wp := CreateWatchPointDirect(
+		t, env, orgID,
+		"INT-001 Precip Alert",
+		40.0, -74.0,
+		conditions, "ANY", channels,
+		&windowStart, &windowEnd,
+		nil, // monitorConfig is nil for event mode
+	)
+
+	t.Logf("  WatchPoint created: %s (tile_id=%s, status=%s)", wp.ID, wp.TileID, wp.Status)
+
+	// Verify tile assignment.
+	// For lat=40.0, lon=-74.0:
+	//   lat_index = FLOOR((90.0 - 40.0) / 22.5) = FLOOR(2.222) = 2
+	//   lon: -74.0 is negative, so 360 + (-74) = 286.0
+	//   lon_index = FLOOR(286.0 / 45.0) = FLOOR(6.355) = 6
+	//   tile_id = "2.6"
+	expectedTileID := "2.6"
+	if wp.TileID != expectedTileID {
+		t.Fatalf("Step 2: expected tile_id %q, got %q", expectedTileID, wp.TileID)
+	}
+	t.Logf("  Tile ID verified: %s", wp.TileID)
+
+	// -----------------------------------------------------------------------
+	// Step 3: Seed a forecast_runs record (Phantom Run Prevention)
+	// -----------------------------------------------------------------------
+	// The Batcher performs Phantom Run Detection (IMPL-003): it queries
+	// forecast_runs for the model+timestamp and rejects the event if no
+	// matching record exists. We must pre-seed this record with status='running'
+	// so the batcher recognizes it as a legitimate forecast.
+	LogSeparator(t, "Step 3: Seed forecast_runs record")
+
+	forecastTimestamp := now.Truncate(time.Second)
+	forecastTimestampStr := forecastTimestamp.Format(time.RFC3339)
+	runID := "run_" + uuid.New().String()
+
+	_, err = env.Pool.Exec(ctx,
+		`INSERT INTO forecast_runs
+		 (id, model, run_timestamp, source_data_timestamp, storage_path, status, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+		runID,
+		"medium_range",
+		forecastTimestamp,
+		forecastTimestamp,
+		fmt.Sprintf("forecasts/medium_range/%s/_SUCCESS", forecastTimestampStr),
+		"running",
+	)
+	if err != nil {
+		t.Fatalf("Step 3: failed to insert forecast_runs record: %v", err)
+	}
+	t.Logf("  Forecast run seeded: %s (model=medium_range, ts=%s, status=running)",
+		runID, forecastTimestampStr)
+
+	// -----------------------------------------------------------------------
+	// Step 4: Trigger Forecast (Seed Zarr data + invoke Batcher)
+	// -----------------------------------------------------------------------
+	// This calls the forecast seeder with the INT-001 scenario config to
+	// generate deterministic Zarr data in MinIO at the expected location,
+	// then invokes the batcher binary with the run context.
+	//
+	// The scenario (int001_precip_trigger.json) injects:
+	//   precipitation_probability = 80.0 at lat=40.0, lon=-74.0
+	// which exceeds our threshold of 50.0.
+	LogSeparator(t, "Step 4: Trigger Forecast")
+
+	scenarioPath := filepath.Join(env.Config.ProjectRoot, "scripts", "scenarios", "int001_precip_trigger.json")
+
+	t.Logf("  Scenario: %s", scenarioPath)
+	t.Logf("  Model: medium_range")
+	t.Logf("  Timestamp: %s", forecastTimestampStr)
+
+	TriggerForecast(t, env, scenarioPath, "medium_range", forecastTimestampStr)
+
+	// -----------------------------------------------------------------------
+	// Step 5: Verify the Batcher updated the forecast run status
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "Step 5: Verify Batcher Actions")
+
+	var runStatus string
+	err = env.Pool.QueryRow(ctx,
+		`SELECT status FROM forecast_runs WHERE id = $1`, runID,
+	).Scan(&runStatus)
+	if err != nil {
+		t.Fatalf("Step 5: failed to query forecast_runs status: %v", err)
+	}
+	if runStatus != "complete" {
+		t.Fatalf("Step 5: expected forecast_runs.status='complete', got %q", runStatus)
+	}
+	t.Logf("  Forecast run status updated to 'complete'")
+
+	// Verify that the batcher enqueued an eval message by checking the
+	// tile_id matches our WatchPoint. We cannot directly inspect SQS from
+	// Go easily, but if the batcher completed without error and the run
+	// is marked complete, the eval message was sent.
+	t.Log("  Batcher completed successfully (eval messages dispatched to SQS)")
+
+	// -----------------------------------------------------------------------
+	// Step 6: Wait for Notification
+	// -----------------------------------------------------------------------
+	// The eval worker (running as a daemon via dev_runner.py) will:
+	//   1. Poll the SQS eval queue
+	//   2. Load the Zarr tile data from MinIO
+	//   3. Evaluate the WatchPoint condition (precip_prob 80 > threshold 50)
+	//   4. Create a notification record in the database
+	//   5. Publish to the notification SQS queue
+	//
+	// We poll the notifications table for a record matching our WatchPoint ID.
+	LogSeparator(t, "Step 6: Wait for Notification")
+
+	t.Logf("  Polling notifications table for watchpoint_id=%s...", wp.ID)
+	t.Logf("  Timeout: %s, Poll interval: %s",
+		env.Config.NotificationPollTimeout, env.Config.NotificationPollInterval)
+
+	notification := WaitForNotification(t, env, wp.ID, "threshold_crossed")
+
+	t.Logf("  Notification received!")
+	t.Logf("    ID:              %s", notification.ID)
+	t.Logf("    WatchPoint ID:   %s", notification.WatchPointID)
+	t.Logf("    Organization ID: %s", notification.OrganizationID)
+	t.Logf("    Event Type:      %s", notification.EventType)
+	t.Logf("    Urgency:         %s", notification.Urgency)
+	t.Logf("    Test Mode:       %v", notification.TestMode)
+	t.Logf("    Created At:      %s", notification.CreatedAt.Format(time.RFC3339))
+
+	// -----------------------------------------------------------------------
+	// Step 7: Assert Notification Properties
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "Step 7: Assert Notification")
+
+	if notification.WatchPointID != wp.ID {
+		t.Fatalf("Step 7: notification.watchpoint_id = %q, want %q",
+			notification.WatchPointID, wp.ID)
+	}
+
+	if notification.OrganizationID != orgID {
+		t.Fatalf("Step 7: notification.organization_id = %q, want %q",
+			notification.OrganizationID, orgID)
+	}
+
+	if notification.EventType != "threshold_crossed" {
+		t.Fatalf("Step 7: notification.event_type = %q, want %q",
+			notification.EventType, "threshold_crossed")
+	}
+
+	if notification.TestMode {
+		t.Fatal("Step 7: notification.test_mode should be false for non-test WatchPoint")
+	}
+
+	t.Log("  All notification assertions passed")
+
+	// -----------------------------------------------------------------------
+	// Step 8: Verify Notification Deliveries
+	// -----------------------------------------------------------------------
+	// The eval worker inserts notification_deliveries records with status='pending'
+	// for each enabled channel. The notification workers (email/webhook) later
+	// update these to 'sent' or 'failed'.
+	LogSeparator(t, "Step 8: Verify Notification Deliveries")
+
+	deliveries := QueryNotificationDeliveries(t, env, notification.ID)
+
+	if len(deliveries) == 0 {
+		t.Fatal("Step 8: no notification_deliveries found for notification")
+	}
+
+	t.Logf("  Found %d delivery record(s):", len(deliveries))
+	for i, d := range deliveries {
+		t.Logf("    [%d] ID=%s channel=%s status=%s attempts=%d",
+			i, d.ID, d.ChannelType, d.Status, d.AttemptCount)
+	}
+
+	// Verify at least one delivery is for the email channel we configured.
+	foundEmail := false
+	for _, d := range deliveries {
+		if d.ChannelType == "email" {
+			foundEmail = true
+			// The delivery may be 'pending' (eval worker just created it),
+			// 'sent' (email worker processed it), or 'failed' (no real
+			// email provider in local mode). Any of these states confirms
+			// that the pipeline created the delivery record.
+			t.Logf("  Email delivery found: status=%s", d.Status)
+			break
+		}
+	}
+	if !foundEmail {
+		t.Fatal("Step 8: no email delivery record found")
+	}
+
+	// -----------------------------------------------------------------------
+	// Step 9: Verify Evaluation State
+	// -----------------------------------------------------------------------
+	// The eval worker should have updated the watchpoint_evaluation_state
+	// table with the trigger result.
+	LogSeparator(t, "Step 9: Verify Evaluation State")
+
+	var triggerState bool
+	var lastEvaluated time.Time
+	err = env.Pool.QueryRow(ctx,
+		`SELECT previous_trigger_state, last_evaluated_at
+		 FROM watchpoint_evaluation_state
+		 WHERE watchpoint_id = $1`,
+		wp.ID,
+	).Scan(&triggerState, &lastEvaluated)
+	if err != nil {
+		t.Fatalf("Step 9: failed to query evaluation state: %v", err)
+	}
+
+	if !triggerState {
+		t.Fatal("Step 9: expected previous_trigger_state=true (condition was triggered)")
+	}
+	t.Logf("  Evaluation state: triggered=true, last_evaluated=%s",
+		lastEvaluated.Format(time.RFC3339))
+
+	// -----------------------------------------------------------------------
+	// Summary
+	// -----------------------------------------------------------------------
+	LogSeparator(t, "INT-001 PASSED")
+	t.Logf("Pipeline verified end-to-end:")
+	t.Logf("  Organization: %s", orgID)
+	t.Logf("  User:         %s", userID)
+	t.Logf("  WatchPoint:   %s (tile=%s)", wp.ID, wp.TileID)
+	t.Logf("  Condition:    precipitation_probability > 50 (actual=80)")
+	t.Logf("  Forecast Run: %s", runID)
+	t.Logf("  Notification: %s (event_type=%s)", notification.ID, notification.EventType)
+	t.Logf("  Deliveries:   %d record(s)", len(deliveries))
 }

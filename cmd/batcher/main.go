@@ -28,8 +28,10 @@ import (
 	cwTypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqsTypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"watchpoint/internal/batcher"
+	"watchpoint/internal/db"
 	"watchpoint/internal/types"
 )
 
@@ -210,11 +212,30 @@ func main() {
 	// Initialize CloudWatch client.
 	cwClient := cloudwatch.NewFromConfig(awsCfg)
 
-	// Wire up the Batcher.
-	// NOTE: Database repositories (Repo, WPRepo) require a database connection pool.
-	// In the production Lambda, these would be initialized from the DATABASE_URL
-	// environment variable during cold start. For now, they are left nil and will
-	// be wired when the database connection infrastructure is integrated.
+	// Initialize database connection pool from DATABASE_URL.
+	// This is used by both Lambda and local modes; the Batcher requires DB access
+	// for Phantom Run Detection (IMPL-003) and tile count queries (EVAL-001).
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		logger.Error("DATABASE_URL environment variable is required")
+		os.Exit(1)
+	}
+
+	pool, err := pgxpool.New(context.Background(), databaseURL)
+	if err != nil {
+		logger.Error("Failed to create database pool", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(context.Background()); err != nil {
+		logger.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("Database connection established")
+
+	// Wire up the Batcher with all dependencies.
 	b := &batcher.Batcher{
 		Config: batcher.BatcherConfig{
 			ForecastBucket:   forecastBucket,
@@ -223,11 +244,9 @@ func main() {
 			MaxPageSize:      batcher.DefaultMaxPageSize,
 			MaxTiles:         100,
 		},
-		Log: logger,
-		// Repo and WPRepo are nil -- they require database pool initialization
-		// which will be wired in a subsequent integration task.
-		Repo:   nil,
-		WPRepo: nil,
+		Log:    logger,
+		Repo:   db.NewForecastRunRepository(pool),
+		WPRepo: db.NewBatcherRepository(pool),
 		SQS: &liveSQSClient{
 			client: sqsClient,
 		},
