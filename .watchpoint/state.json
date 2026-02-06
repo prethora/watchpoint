@@ -1653,11 +1653,11 @@
           "NOTIF-003"
         ],
         "definition_of_done": "Unit tests verify next-run calculation.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T12:44:20.060510+00:00",
+        "completed_at": "2026-02-06T12:51:55.374894+00:00",
+        "satisfaction_iterations": 3,
         "skip_reason": null
       },
       {
