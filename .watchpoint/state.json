@@ -2274,11 +2274,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Script exists and is executable. Dry-run confirms that both images are targeted at the same repository URI with distinct tags.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-06T20:15:06.160568+00:00Z",
+        "completed_at": "2026-02-06T20:17:30.341094+00:00Z",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       }
     ],
