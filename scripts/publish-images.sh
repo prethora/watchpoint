@@ -29,6 +29,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 DRY_RUN="${DRY_RUN:-false}"
+export AWS_DEFAULT_PROFILE="${AWS_DEFAULT_PROFILE:-watchpoint-deployer}"
 SHA="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 
 # Colors for terminal output (disabled if not a TTY)

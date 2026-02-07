@@ -9,7 +9,7 @@
 //
 //	go run ./cmd/ops/bootstrap --env=dev
 //	go run ./cmd/ops/bootstrap --env=dev --export-env
-//	go run ./cmd/ops/bootstrap --env=prod --profile=watchpoint-prod --region=us-east-1
+//	go run ./cmd/ops/bootstrap --env=prod --region=us-east-1
 //
 // The tool performs the following:
 //  1. Parses --env, --profile, --region, --export-env, and --export-env-path flags.
@@ -79,7 +79,7 @@ type BootstrapContext struct {
 func main() {
 	// Parse command-line flags.
 	envFlag := flag.String("env", "", "Target environment (dev/staging/prod) [required]")
-	profileFlag := flag.String("profile", "", "AWS CLI profile (default: uses default credential chain)")
+	profileFlag := flag.String("profile", "watchpoint-deployer", "AWS CLI profile")
 	regionFlag := flag.String("region", "us-east-1", "AWS region")
 	exportEnvFlag := flag.Bool("export-env", false, "After bootstrap, export SSM parameters to a .env file for local development")
 	exportEnvPath := flag.String("export-env-path", ".env", "Path for the exported .env file (default: .env in project root)")
