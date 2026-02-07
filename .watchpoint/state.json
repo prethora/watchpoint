@@ -2456,11 +2456,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Script creates (or verifies) the bucket and applies the lifecycle policy successfully.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-07T19:43:29.084240+00:00",
+        "completed_at": "2026-02-07T19:45:58.557821+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
