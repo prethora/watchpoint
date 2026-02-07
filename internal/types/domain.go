@@ -312,12 +312,15 @@ type OAuthProfile struct {
 }
 
 // SendInput defines the contract for email transmission.
+// The caller is responsible for rendering Subject/Body before calling Send;
+// the email provider transmits pre-rendered content (no server-side templates).
 type SendInput struct {
-	To           string
-	From         SenderIdentity
-	TemplateID   string
-	TemplateData map[string]interface{}
-	ReferenceID  string
+	To          string
+	From        SenderIdentity
+	Subject     string
+	BodyHTML    string
+	BodyText    string
+	ReferenceID string
 }
 
 // SenderIdentity defines the sender for outgoing emails.

@@ -533,10 +533,9 @@ func TestSendInputFieldPresence(t *testing.T) {
 			Name:    "WatchPoint Alerts",
 			Address: "alerts@watchpoint.io",
 		},
-		TemplateID: "threshold_crossed",
-		TemplateData: map[string]interface{}{
-			"watchpoint_name": "Downtown Sensor",
-		},
+		Subject:     "Threshold Crossed: Downtown Sensor",
+		BodyHTML:     "<h1>Alert</h1><p>Downtown Sensor threshold crossed</p>",
+		BodyText:     "Alert: Downtown Sensor threshold crossed",
 		ReferenceID: "notif_abc123",
 	}
 
@@ -545,6 +544,9 @@ func TestSendInputFieldPresence(t *testing.T) {
 	}
 	if input.ReferenceID != "notif_abc123" {
 		t.Errorf("ReferenceID mismatch: got %q, want %q", input.ReferenceID, "notif_abc123")
+	}
+	if input.Subject != "Threshold Crossed: Downtown Sensor" {
+		t.Errorf("Subject mismatch: got %q", input.Subject)
 	}
 }
 
