@@ -1,0 +1,13 @@
+{{define "content"}}
+<div class="header" style="background:#b91c1c">
+<h1>System Alert</h1>
+</div>
+<div class="body">
+<p>A system event requires your attention.</p>
+<table class="detail-table">
+{{if .BouncedAddress}}<tr><td>Bounced Address</td><td>{{.BouncedAddress}}</td></tr>{{end}}
+{{if .DisabledReason}}<tr><td>Reason</td><td>{{.DisabledReason}}</td></tr>{{end}}
+<tr><td>Time</td><td>{{.FormattedDate}}</td></tr>
+</table>
+</div>
+{{end}}

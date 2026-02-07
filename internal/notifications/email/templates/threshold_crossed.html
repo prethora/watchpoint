@@ -1,0 +1,16 @@
+{{define "content"}}
+<div class="header">
+<h1>Threshold Crossed: {{.WatchPointName}}</h1>
+</div>
+<div class="body">
+<p>A condition on <strong>{{.WatchPointName}}</strong> has been triggered.</p>
+<table class="detail-table">
+<tr><td>Location</td><td>{{.Location}}</td></tr>
+<tr><td>Event</td><td>Threshold Crossed</td></tr>
+<tr><td>Time</td><td>{{.FormattedDate}}</td></tr>
+<tr><td>Timezone</td><td>{{.TimezoneName}}</td></tr>
+{{if .Urgency}}<tr><td>Urgency</td><td><span class="badge {{if eq .Urgency "critical"}}badge-critical{{else}}badge-warning{{end}}">{{.Urgency}}</span></td></tr>{{end}}
+</table>
+{{if .ConditionsSummary}}<p><strong>Conditions:</strong> {{.ConditionsSummary}}</p>{{end}}
+</div>
+{{end}}

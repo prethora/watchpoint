@@ -1,0 +1,16 @@
+IMMINENT ALERT: {{.WatchPointName}}
+
+An imminent weather event has been detected for "{{.WatchPointName}}".
+
+Location:  {{.Location}}
+Time:      {{.FormattedDate}}
+Timezone:  {{.TimezoneName}}
+{{- if .Urgency}}
+Urgency:   {{.Urgency}}
+{{- end}}
+{{- if .ConditionsSummary}}
+Conditions: {{.ConditionsSummary}}
+{{- end}}
+
+--
+WatchPoint - Weather Monitoring & Alerts

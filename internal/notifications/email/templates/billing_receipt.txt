@@ -1,0 +1,8 @@
+PAYMENT RECEIPT
+
+Thank you for your payment.
+
+Date: {{.FormattedDate}}
+
+--
+WatchPoint - Weather Monitoring & Alerts

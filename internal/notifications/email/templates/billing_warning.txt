@@ -1,0 +1,10 @@
+BILLING ALERT
+
+There is an issue with your billing that requires attention.
+
+Time: {{.FormattedDate}}
+
+Please visit your billing dashboard to resolve this issue.
+
+--
+WatchPoint - Weather Monitoring & Alerts

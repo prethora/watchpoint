@@ -1,0 +1,16 @@
+THRESHOLD CROSSED: {{.WatchPointName}}
+
+A condition on "{{.WatchPointName}}" has been triggered.
+
+Location:  {{.Location}}
+Time:      {{.FormattedDate}}
+Timezone:  {{.TimezoneName}}
+{{- if .Urgency}}
+Urgency:   {{.Urgency}}
+{{- end}}
+{{- if .ConditionsSummary}}
+Conditions: {{.ConditionsSummary}}
+{{- end}}
+
+--
+WatchPoint - Weather Monitoring & Alerts

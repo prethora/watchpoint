@@ -1,0 +1,14 @@
+{{define "content"}}
+<div class="header" style="background:#059669">
+<h1>Threshold Cleared: {{.WatchPointName}}</h1>
+</div>
+<div class="body">
+<p>Conditions on <strong>{{.WatchPointName}}</strong> have returned to normal.</p>
+<table class="detail-table">
+<tr><td>Location</td><td>{{.Location}}</td></tr>
+<tr><td>Event</td><td>Threshold Cleared</td></tr>
+<tr><td>Time</td><td>{{.FormattedDate}}</td></tr>
+<tr><td>Timezone</td><td>{{.TimezoneName}}</td></tr>
+</table>
+</div>
+{{end}}

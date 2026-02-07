@@ -1,0 +1,13 @@
+SYSTEM ALERT
+
+A system event requires your attention.
+{{- if .BouncedAddress}}
+Bounced Address: {{.BouncedAddress}}
+{{- end}}
+{{- if .DisabledReason}}
+Reason: {{.DisabledReason}}
+{{- end}}
+Time: {{.FormattedDate}}
+
+--
+WatchPoint - Weather Monitoring & Alerts

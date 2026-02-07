@@ -1,0 +1,10 @@
+THRESHOLD CLEARED: {{.WatchPointName}}
+
+Conditions on "{{.WatchPointName}}" have returned to normal.
+
+Location:  {{.Location}}
+Time:      {{.FormattedDate}}
+Timezone:  {{.TimezoneName}}
+
+--
+WatchPoint - Weather Monitoring & Alerts

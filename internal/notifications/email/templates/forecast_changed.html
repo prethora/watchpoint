@@ -1,0 +1,14 @@
+{{define "content"}}
+<div class="header" style="background:#2563eb">
+<h1>Forecast Update: {{.WatchPointName}}</h1>
+</div>
+<div class="body">
+<p>The forecast for <strong>{{.WatchPointName}}</strong> has changed significantly.</p>
+<table class="detail-table">
+<tr><td>Location</td><td>{{.Location}}</td></tr>
+<tr><td>Event</td><td>Forecast Changed</td></tr>
+<tr><td>Time</td><td>{{.FormattedDate}}</td></tr>
+<tr><td>Timezone</td><td>{{.TimezoneName}}</td></tr>
+</table>
+</div>
+{{end}}

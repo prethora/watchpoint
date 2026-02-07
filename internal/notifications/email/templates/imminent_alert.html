@@ -1,0 +1,16 @@
+{{define "content"}}
+<div class="header" style="background:#dc2626">
+<h1>Imminent Alert: {{.WatchPointName}}</h1>
+</div>
+<div class="body">
+<p>An imminent weather event has been detected for <strong>{{.WatchPointName}}</strong>.</p>
+<table class="detail-table">
+<tr><td>Location</td><td>{{.Location}}</td></tr>
+<tr><td>Event</td><td>Imminent Alert</td></tr>
+<tr><td>Time</td><td>{{.FormattedDate}}</td></tr>
+<tr><td>Timezone</td><td>{{.TimezoneName}}</td></tr>
+{{if .Urgency}}<tr><td>Urgency</td><td><span class="badge badge-critical">{{.Urgency}}</span></td></tr>{{end}}
+</table>
+{{if .ConditionsSummary}}<p><strong>Conditions:</strong> {{.ConditionsSummary}}</p>{{end}}
+</div>
+{{end}}
