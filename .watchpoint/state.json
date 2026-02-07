@@ -2510,11 +2510,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`samconfig.toml` is generated with correct bucket, parameter overrides, and image repository mappings.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-07T19:51:37.456085+00:00",
+        "completed_at": "2026-02-07T19:55:47.469753+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
