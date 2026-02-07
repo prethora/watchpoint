@@ -1,5 +1,5 @@
 .PHONY: test build clean migrate-up migrate-down mocks lint-python run-job run-stack stop-stack \
-       build-lambda build-images build-all
+       build-lambda build-images build-all deploy-cloud
 
 # Git commit SHA used for tagging build artifacts
 SHA := $(shell git rev-parse --short HEAD)
@@ -146,3 +146,68 @@ build-images:
 # ---------------------------------------------------------------------------
 build-all: build-lambda build-images
 	@echo "All artifacts built successfully."
+
+# ---------------------------------------------------------------------------
+# Cloud deployment: end-to-end deploy pipeline
+# ---------------------------------------------------------------------------
+# Chains all provisioning scripts, then runs sam build and sam deploy.
+#
+# Usage:
+#   make deploy-cloud ENV=dev
+#   make deploy-cloud ENV=staging
+#   make deploy-cloud ENV=prod
+#
+# Environment variables are forwarded to the underlying scripts:
+#   AWS_REGION, DOMAIN_NAME, CERTIFICATE_ARN, ALERT_EMAIL, RUNPOD_ENDPOINT,
+#   GOOGLE_CLIENT_ID, GITHUB_CLIENT_ID, CORS_ORIGINS
+#
+# The pipeline:
+#   1. Preflight checks (AWS CLI, SAM CLI, Docker, ACM cert)
+#   2. Provision artifact S3 bucket (idempotent)
+#   3. Bootstrap ECR repository (idempotent)
+#   4. Generate samconfig.toml from current AWS account
+#   5. sam build (compiles Go Lambdas, builds container images)
+#   6. sam deploy --config-env $(ENV)
+#
+# For dev/staging, confirm_changeset is false (no interactive prompts).
+# For prod, confirm_changeset is true (requires manual confirmation).
+
+# Default to dev if ENV is not specified
+ENV ?= dev
+
+# Validate ENV is one of the allowed values
+VALID_ENVS := dev staging prod
+
+deploy-cloud:
+	@if echo "$(VALID_ENVS)" | grep -qw "$(ENV)"; then \
+		true; \
+	else \
+		echo "Error: ENV must be one of: $(VALID_ENVS) (got '$(ENV)')"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "============================================"
+	@echo "  WatchPoint Cloud Deploy (ENV=$(ENV))"
+	@echo "============================================"
+	@echo ""
+	@echo "Step 1/6: Running preflight checks..."
+	./scripts/preflight-check.sh
+	@echo ""
+	@echo "Step 2/6: Provisioning artifact bucket..."
+	./scripts/provision-artifact-bucket.sh >/dev/null
+	@echo ""
+	@echo "Step 3/6: Bootstrapping ECR repository..."
+	./scripts/bootstrap-ecr.sh >/dev/null
+	@echo ""
+	@echo "Step 4/6: Generating samconfig.toml..."
+	./scripts/generate-sam-config.sh >/dev/null
+	@echo ""
+	@echo "Step 5/6: Running sam build..."
+	sam build
+	@echo ""
+	@echo "Step 6/6: Deploying stack (config-env=$(ENV))..."
+	sam deploy --config-env $(ENV) --no-fail-on-empty-changeset
+	@echo ""
+	@echo "============================================"
+	@echo "  Deployment complete (ENV=$(ENV))"
+	@echo "============================================"
