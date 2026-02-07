@@ -200,7 +200,7 @@ The **Implementation Type** column indicates *where* the logic resides:
 | **API** | HTTP Request | DB Write, Audit Log | DB, SSM, Redis (optional) |
 | **Batcher** | S3 Event (`_SUCCESS`) | SQS Message, `ForecastReady` Metric | DB (Read), SQS |
 | **Eval Worker** | SQS Message | DB Write (State), SQS (Notif), S3 (Read) | S3, DB, SQS |
-| **Notification** | SQS Message | DB Write (Delivery), HTTP/SMTP Out | SendGrid, Ext. Webhooks |
+| **Notification** | SQS Message | DB Write (Delivery), HTTP/SMTP Out | AWS SES, Ext. Webhooks |
 | **Data Poller** | EventBridge (Time) | RunPod API Call, DB Write (Run Status) | RunPod, AWS S3 (List) |
 | **RunPod** | HTTP Request | S3 Write (Zarr) | S3 |
 

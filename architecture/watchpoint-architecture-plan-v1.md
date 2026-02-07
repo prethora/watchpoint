@@ -173,7 +173,7 @@ References between documents use consistent format:
 | Logging | `log/slog` | stdlib | Structured logging, Go 1.21+ standard library |
 | AWS SDK | `github.com/aws/aws-sdk-go-v2` | v2.x | Current generation, modular imports |
 | Stripe | `github.com/stripe/stripe-go/v76` | v76.x | Official Stripe SDK |
-| SendGrid | `github.com/sendgrid/sendgrid-go` | latest | Official SendGrid SDK |
+| AWS SES | `github.com/aws/aws-sdk-go-v2/service/sesv2` | v2.x | AWS SES v2 SDK (IAM auth) |
 | OAuth | `golang.org/x/oauth2` | latest | Standard library extension |
 | UUID | `github.com/google/uuid` | latest | Client-side UUID generation when needed |
 | Rate Limiting | `golang.org/x/time/rate` | latest | Token bucket rate limiter |
@@ -202,7 +202,7 @@ References between documents use consistent format:
 | Secrets | AWS SSM Parameter Store | SecureString type |
 | Monitoring | AWS CloudWatch | Metrics, logs, alarms |
 | Payments | Stripe | Checkout, billing portal, webhooks |
-| Email | SendGrid | Transactional email, templates |
+| Email | AWS SES | Transactional email, client-side templates |
 
 ### 4.4 Conventions
 
@@ -237,10 +237,10 @@ References between documents use consistent format:
 | 06 | `06-batcher.md` | Worker | Batcher Lambda, tile grouping, SQS enqueueing | Medium |
 | 07 | `07-eval-worker.md` | Worker | Python eval worker, Zarr reading, condition evaluation | Large |
 | 08a | `08a-notification-core.md` | Worker | Shared notification patterns, digest generation | Medium |
-| 08b | `08b-email-worker.md` | Worker | Email delivery, SendGrid, templates | Small |
+| 08b | `08b-email-worker.md` | Worker | Email delivery, AWS SES, templates | Small |
 | 08c | `08c-webhook-worker.md` | Worker | Webhook delivery, platform formatting, HMAC | Medium |
 | 09 | `09-scheduled-jobs.md` | Background | All EventBridge-triggered jobs | Medium |
-| 10 | `10-external-integrations.md` | External | Stripe, SendGrid, OAuth provider integrations | Medium |
+| 10 | `10-external-integrations.md` | External | Stripe, AWS SES, OAuth provider integrations | Medium |
 | 11 | `11-runpod.md` | External | RunPod inference interface and deployment | Small |
 | 12 | `12-operations.md` | Operations | Local dev, deployment, monitoring, incidents | Medium |
 | 13 | `13-human-setup.md` | Operations | AI-to-human guide for manual setup steps | Medium |
@@ -508,7 +508,6 @@ Each document can reference all previously completed documents.
 - DATABASE_URL
 - STRIPE_SECRET_KEY
 - STRIPE_WEBHOOK_SECRET
-- SENDGRID_API_KEY
 - RUNPOD_API_KEY
 - OAuth client secrets (Google, GitHub)
 
@@ -1031,7 +1030,7 @@ type NotificationChannel interface {
 
 #### 8.4.4 08b-email-worker.md
 
-**Purpose**: Email notification delivery using SendGrid, including templates and bounce handling.
+**Purpose**: Email notification delivery using AWS SES, including client-side templates and bounce handling.
 
 **Dependencies**: 08a-notification-core
 
@@ -1042,11 +1041,11 @@ type NotificationChannel interface {
 | Section | Contents |
 |---------|----------|
 | Worker Structure | EmailWorker with dependencies |
-| SendGrid Client | Client wrapper, API calls |
-| Email Formatting | Template rendering |
-| Templates | Template IDs and variables |
-| Bounce Handling | Webhook processing for bounces |
-| Error Mapping | SendGrid errors to retry decisions |
+| SES Client | Client wrapper, API calls |
+| Email Formatting | Client-side template rendering (go:embed) |
+| Templates | Embedded Go templates |
+| Bounce Handling | SNS event processing for bounces |
+| Error Mapping | SES errors to retry decisions |
 
 **Templates**:
 - watchpoint-triggered
@@ -1061,7 +1060,7 @@ type NotificationChannel interface {
 **Estimated Sections**:
 1. Overview
 2. Worker Structure
-3. SendGrid Client
+3. SES Client
 4. Email Formatting
 5. Template Definitions
 6. Delivery Logic
@@ -1174,7 +1173,7 @@ type NotificationChannel interface {
 
 #### 8.6.1 10-external-integrations.md
 
-**Purpose**: Third-party service integrations including Stripe, SendGrid, and OAuth providers.
+**Purpose**: Third-party service integrations including Stripe, AWS SES, and OAuth providers.
 
 **Dependencies**: 01-foundation-types, 03-config
 
@@ -1186,18 +1185,18 @@ type NotificationChannel interface {
 |---------|----------|
 | Common Patterns | API client structure, retry policy, circuit breaker |
 | Stripe | Outbound API calls, incoming webhooks |
-| SendGrid | Outbound API calls, incoming webhooks |
+| AWS SES | Outbound API calls, SNS bounce notifications |
 | Google OAuth | Authorization URL, token exchange, user info |
 | GitHub OAuth | Authorization URL, token exchange, user info |
 | Webhook Security | Signature verification patterns |
 
-**Flow Coverage**: BILL-001 through BILL-007 (Stripe), NOTIF-006 (SendGrid), DASH-002 (OAuth)
+**Flow Coverage**: BILL-001 through BILL-007 (Stripe), NOTIF-006 (SES/SNS), DASH-002 (OAuth)
 
 **Estimated Sections**:
 1. Overview
 2. Common Patterns
 3. Stripe Integration
-4. SendGrid Integration
+4. AWS SES Integration
 5. Google OAuth
 6. GitHub OAuth
 7. Webhook Security
@@ -1300,7 +1299,7 @@ type NotificationChannel interface {
 | AWS Account | Account creation, billing alerts |
 | Supabase | Project creation, connection string |
 | Stripe | Account, webhook configuration |
-| SendGrid | Account, API key, domain verification |
+| AWS SES | Domain/identity verification (IAM auth, no API key) |
 | RunPod | Account, endpoint deployment |
 | OAuth Apps | Google, GitHub app registration |
 | Domain | Registration, DNS configuration |
@@ -1317,7 +1316,7 @@ type NotificationChannel interface {
 3. AWS Account Setup
 4. Supabase Setup
 5. Stripe Setup
-6. SendGrid Setup
+6. AWS SES Setup
 7. RunPod Setup
 8. OAuth App Registration
 9. Domain and DNS
@@ -1509,7 +1508,7 @@ After all sub-documents are complete:
 
 - [ ] All external services documented in 10
   - [ ] Stripe (API + webhooks)
-  - [ ] SendGrid (API + webhooks)
+  - [ ] AWS SES (API + SNS bounce handling)
   - [ ] Google OAuth
   - [ ] GitHub OAuth
 - [ ] NOAA data sources documented
@@ -1538,7 +1537,7 @@ After all sub-documents are complete:
   - [ ] AWS account
   - [ ] Supabase project
   - [ ] Stripe account
-  - [ ] SendGrid account
+  - [ ] AWS SES identity verification
   - [ ] RunPod account
   - [ ] OAuth apps
   - [ ] Domain/DNS

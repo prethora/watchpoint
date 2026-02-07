@@ -63,9 +63,10 @@ Globals:
         # Publishable key is usually public/non-sensitive, but kept in SSM for consistency
         STRIPE_PUBLISHABLE_KEY_SSM_PARAM: !Sub /${Environment}/watchpoint/billing/stripe_publishable_key
 
-        # --- Email (SendGrid) ---
-        SENDGRID_API_KEY_SSM_PARAM: !Sub /${Environment}/watchpoint/email/sendgrid_api_key
-        
+        # --- Email (SES) ---
+        # SES uses IAM-based authentication; no API key needed.
+        # SES_REGION defaults to us-east-1 in EmailConfig.
+
         # --- Forecast (RunPod) ---
         RUNPOD_API_KEY_SSM_PARAM: !Sub /${Environment}/watchpoint/forecast/runpod_api_key
         RUNPOD_ENDPOINT_ID: !Ref RunPodEndpointId # Direct value, not a secret
@@ -232,6 +233,9 @@ Defined with strict visibility timeouts to exceed Lambda timeouts.
 *   **Policies**:
     *   `SSMParameterReadPolicy`: `ParameterName: !Sub /${Environment}/watchpoint/*`
     *   `SQSSendMessagePolicy`: `QueueName: !GetAtt NotificationQueue.QueueName`
+    *   **SES Send Policy** (Inline):
+        *   Action: `ses:SendEmail`, `ses:SendRawEmail`
+        *   Resource: `*` (or scoped to verified identities ARN)
 
 #### **BatcherFunction**
 *   **Code**: `cmd/batcher/`
@@ -305,6 +309,9 @@ Defined with strict visibility timeouts to exceed Lambda timeouts.
         # Filtering happens inside the Lambda code or can be done via SQS attribute filtering if implemented in batcher
 *   **Policies**:
     *   `SSMParameterReadPolicy`: `ParameterName: !Sub /${Environment}/watchpoint/*`
+    *   **SES Send Policy** (Inline):
+        *   Action: `ses:SendEmail`, `ses:SendRawEmail`
+        *   Resource: `*` (or scoped to verified identities ARN)
 
 #### **WebhookWorkerFunction**
 *   **Code**: `cmd/webhook-worker/`

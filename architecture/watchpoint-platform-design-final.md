@@ -755,7 +755,7 @@ Emitted when a notification is placed in the delivery queue.
     "notification_id": "notif_abc123",
     "delivery_id": "del_xyz789",
     "channel": "email",
-    "provider": "sendgrid",
+    "provider": "ses",
     "provider_message_id": "sg_12345",
     "delivered_at": "2026-01-31T12:16:00Z"
   }
@@ -1434,7 +1434,7 @@ Evaluation Engine
 ┌─────────────────────────────────────────┐
 │  External Providers                     │
 │  • Webhook: Direct HTTP POST            │
-│  • Email: SendGrid / SES / Postmark     │
+│  • Email: AWS SES                       │
 └─────────────────────────────────────────┘
 ```
 
@@ -2831,7 +2831,7 @@ Production secrets stored in:
 
 Secrets include:
 - Database credentials
-- API keys for external services (SendGrid, Stripe)
+- API keys for external services (Stripe)
 - RunPod API key
 - Webhook signing keys
 
@@ -3260,7 +3260,7 @@ Our accuracy:       Correctly predicted
 | Channel | Integration | Auth |
 |---------|-------------|------|
 | Webhook | HTTPS POST | HMAC signature (optional) |
-| Email | SendGrid/SES/Postmark API | Provider SDK |
+| Email | AWS SES API | AWS SDK (IAM auth) |
 
 Webhook auto-detects and formats for:
 - Slack (Block Kit)
@@ -3344,7 +3344,7 @@ Webhook auto-detects and formats for:
 │            │                                                ▼              │
 │            │                                    ┌───────────────────────┐  │
 │   ┌────────┴────────┐                           │  EXTERNAL DELIVERY    │  │
-│   │    API LAYER    │                           │  SendGrid (email),    │  │
+│   │    API LAYER    │                           │  AWS SES (email),     │  │
 │   │                 │                           │  HTTP POST (webhooks) │  │
 │   │ /v1/watchpoints │                           │  auto-formatted for   │  │
 │   │ /v1/forecasts   │                           │  Slack/Discord/Teams  │  │

@@ -1,6 +1,6 @@
 # 10 - External Integrations
 
-> **Purpose**: Defines the abstraction layer for third-party services (Stripe, SendGrid, OAuth). This package ensures the core domain logic remains decoupled from specific vendor implementations, handles network resilience (retries, circuit breaking), and manages vendor-specific security patterns (webhook signature verification).
+> **Purpose**: Defines the abstraction layer for third-party services (Stripe, AWS SES, OAuth). This package ensures the core domain logic remains decoupled from specific vendor implementations, handles network resilience (retries, circuit breaking), and manages vendor-specific security patterns (webhook signature verification).
 > **Package**: `package external`
 > **Dependencies**: `01-foundation-types.md`, `03-config.md`
 > **Dependents**: `05e-api-billing`, `05f-api-auth`, `08b-email-worker`
@@ -13,7 +13,7 @@
 2. [Type Migrations](#2-type-migrations)
 3. [Common Infrastructure](#3-common-infrastructure)
 4. [Billing Integration (Stripe)](#4-billing-integration-stripe)
-5. [Email Integration (SendGrid)](#5-email-integration-sendgrid)
+5. [Email Integration (AWS SES)](#5-email-integration-aws-ses)
 6. [Identity Integration (OAuth)](#6-identity-integration-oauth)
 7. [Client Registry & Configuration](#7-client-registry--configuration)
 8. [Testing & Mocks](#8-testing--mocks)
@@ -91,7 +91,9 @@ Vendor-specific errors are translated into `types.AppError` codes to keep the do
 | Vendor Error | WatchPoint Error |
 |---|---|
 | Stripe `card_declined` | `types.ErrPaymentDeclined` |
-| SendGrid `403 Forbidden` | `types.ErrEmailBlocked` |
+| SES `MessageRejected` | `types.ErrCodeEmailBlocked` |
+| SES `TooManyRequestsException` | `types.ErrCodeUpstreamRateLimited` |
+| SES `AccountSendingPausedException` | `types.ErrCodeUpstreamUnavailable` |
 | HTTP 429 | `types.ErrUpstreamRateLimited` |
 | HTTP 500+ | `types.ErrUpstreamUnavailable` |
 
@@ -161,7 +163,7 @@ const (
 
 ---
 
-## 5. Email Integration (SendGrid)
+## 5. Email Integration (AWS SES)
 
 ### 5.1 Interface Definition
 
@@ -169,40 +171,39 @@ Matches `EmailProvider` defined in `08b-email-worker`.
 
 ```go
 type EmailProvider interface {
-    // Send maps domain inputs to provider-specific template calls
+    // Send transmits a pre-rendered email via AWS SES.
+    // Returns provider_message_id on success.
     Send(ctx context.Context, input types.SendInput) (providerMsgID string, err error)
 }
 ```
 
-### 5.2 Webhook Verification (ECDSA)
+### 5.2 Bounce/Complaint Handling (SNS)
 
-Exposed for use by `08b`'s bounce handler.
+SES publishes bounce and complaint notifications to an SNS topic. The `ParseSNSBounceEvent` function normalizes these into `BounceEvent` structs for the `BounceProcessor`. No webhook signature verification interface is needed -- SNS message authenticity is verified by the AWS SDK.
 
 ```go
-type EmailVerifier interface {
-    Verify(payload []byte, signature string, timestamp string, publicKey string) (bool, error)
-}
-
-type SendGridVerifier struct{}
-
-// Verify checks the ECDSA signature from X-Twilio-Email-Event-Webhook-Signature
-func (v *SendGridVerifier) Verify(payload []byte, signature string, timestamp string, publicKey string) (bool, error)
+// ParseSNSBounceEvent parses an SNS notification from SES into a BounceEvent.
+func ParseSNSBounceEvent(snsMessage []byte) (*BounceEvent, error)
 ```
 
 ### 5.3 Event Constants
 
 ```go
 const (
-    EventSendGridBounce    = "bounce"
-    EventSendGridComplaint = "spamreport"
+    EventSESBounce    = "Bounce"
+    EventSESComplaint = "Complaint"
 )
 ```
 
-### 5.4 Implementation Details (`SendGridClient`)
+### 5.4 Implementation Details (`SESClient`)
 
-*   **Config**: Initialized with `SendGridAPIKey`.
-*   **Timeout**: 10 seconds.
-*   **Template Logic**: Maps `types.SendInput.TemplateData` to SendGrid dynamic template variables.
+*   **Config**: `SESClientConfig{Region, ConfigSetName, Logger}`. Initialized with `aws.Config` (IAM-based auth, no API key).
+*   **SDK**: AWS SES v2 SDK (`sesv2.Client`).
+*   **Timeout**: Governed by the AWS SDK HTTP client configuration.
+*   **Error Mapping**:
+    *   `MessageRejected` -> `types.ErrCodeEmailBlocked`
+    *   `TooManyRequestsException` -> `types.ErrCodeUpstreamRateLimited`
+    *   `AccountSendingPausedException` -> `types.ErrCodeUpstreamUnavailable`
 
 ---
 
@@ -249,16 +250,16 @@ type ClientRegistry struct {
     Billing BillingService
     Email   EmailProvider
     OAuth   OAuthManager
-    
+
     // Verifiers
     StripeVerifier WebhookVerifier
-    EmailVerifier  EmailVerifier
 }
 
 // NewClientRegistry initializes clients.
+// The awsCfg parameter provides AWS credentials/region for SES initialization.
 // If config.IsTestMode is true, returns Mock implementations.
 // Sets strict timeouts per provider.
-func NewClientRegistry(cfg *config.Config, logger *slog.Logger) (*ClientRegistry, error)
+func NewClientRegistry(cfg *config.Config, awsCfg aws.Config, logger *slog.Logger) (*ClientRegistry, error)
 ```
 
 ---
@@ -291,7 +292,7 @@ type MockOAuthProvider struct {
 | `BILL-001` | Create Customer | `StripeClient` | `EnsureCustomer` |
 | `BILL-002` | Checkout Session | `StripeClient` | `CreateCheckoutSession` |
 | `BILL-007` | Stripe Webhook | `StripeVerifier` | `Verify` |
-| `NOTIF-001` | Email Send | `SendGridClient` | `Send` |
-| `NOTIF-006` | Bounce Webhook | `SendGridVerifier` | `Verify` |
+| `NOTIF-001` | Email Send | `SESClient` | `Send` |
+| `NOTIF-006` | Bounce Handling | `ParseSNSBounceEvent` | SNS event parsing |
 | `DASH-002` | OAuth Callback | `Google/GithubProvider` | `Exchange` |
 | `TEST-004` | Mock Mode | `ClientRegistry` | `NewClientRegistry` |

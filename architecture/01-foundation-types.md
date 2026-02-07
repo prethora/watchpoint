@@ -1148,12 +1148,15 @@ type OAuthProfile struct {
 
 ```go
 // SendInput defines the contract for email transmission.
+// Templates are rendered client-side using Go html/template + text/template
+// with go:embed, so the provider receives pre-rendered content.
 type SendInput struct {
-    To           string
-    From         SenderIdentity
-    TemplateID   string
-    TemplateData map[string]interface{}
-    ReferenceID  string // Internal NotificationID for correlation
+    To          string
+    From        SenderIdentity
+    Subject     string
+    BodyHTML    string
+    BodyText    string
+    ReferenceID string // Internal NotificationID for correlation
 }
 
 type SenderIdentity struct {

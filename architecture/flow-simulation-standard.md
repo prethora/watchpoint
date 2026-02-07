@@ -33,7 +33,7 @@ Explicitly list every read and mutation to persistent storage.
 *   **Cache**: `Set`, `Get`
 
 ### 1.5 External Interactions
-List API calls to third-party services (Stripe, SendGrid, RunPod).
+List API calls to third-party services (Stripe, AWS SES, RunPod).
 *   **Request**: Key data sent.
 *   **Response**: Key data received.
 

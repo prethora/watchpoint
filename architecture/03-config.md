@@ -118,13 +118,10 @@ type FeatureConfig struct {
 }
 
 type EmailConfig struct {
-    SendGridAPIKey SecretString `envconfig:"SENDGRID_API_KEY" validate:"required"`
-    FromAddress    string       `envconfig:"EMAIL_FROM_ADDRESS" default:"alerts@watchpoint.io"`
-    FromName       string       `envconfig:"EMAIL_FROM_NAME" default:"WatchPoint Alerts"`
-    // Templates: JSON mapping "template_set" -> "event_type" -> "provider_id"
-    // Example: {"default": {"threshold_crossed": "d-123..."}}
-    Templates      string       `envconfig:"EMAIL_TEMPLATES_JSON" validate:"required,json"`
-    Provider       string       `envconfig:"EMAIL_PROVIDER" default:"sendgrid"`
+    FromAddress string `envconfig:"EMAIL_FROM_ADDRESS" default:"alerts@watchpoint.io"`
+    FromName    string `envconfig:"EMAIL_FROM_NAME" default:"WatchPoint Alerts"`
+    SESRegion   string `envconfig:"SES_REGION" default:"us-east-1"`
+    Provider    string `envconfig:"EMAIL_PROVIDER" default:"ses"`
 }
 
 type ForecastConfig struct {
@@ -207,8 +204,8 @@ These variables contain non-sensitive configuration or resource identifiers.
 | `SQS_NOTIFICATIONS` | URL | SQS URL. |
 | `SQS_DLQ` | URL | SQS URL. |
 | `CORS_ALLOWED_ORIGINS`| List | Comma-separated allowed origins. |
-| `EMAIL_TEMPLATES_JSON`| JSON | Template ID mapping for email provider. |
-| `EMAIL_PROVIDER`      | String | Email provider name (default: sendgrid). |
+| `EMAIL_PROVIDER`      | String | Email provider name (default: ses). |
+| `SES_REGION`          | String | AWS SES region (default: us-east-1). |
 | `WEBHOOK_USER_AGENT`  | String | User-Agent header for webhook requests. |
 | `WEBHOOK_TIMEOUT`     | Duration | Timeout for webhook HTTP requests. |
 | `WEBHOOK_MAX_REDIRECTS`| Number | Max redirects to follow for webhooks. |
@@ -224,13 +221,11 @@ These variables contain **Path Strings** pointing to AWS SSM Parameter Store val
 | `DATABASE_URL_SSM_PARAM` | `/{env}/watchpoint/database/url` |
 | `STRIPE_SECRET_KEY_SSM_PARAM` | `/{env}/watchpoint/billing/stripe_secret_key` |
 | `STRIPE_WEBHOOK_SECRET_SSM_PARAM`| `/{env}/watchpoint/billing/stripe_webhook_secret` |
-| `SENDGRID_API_KEY_SSM_PARAM` | `/{env}/watchpoint/email/sendgrid_api_key` |
 | `RUNPOD_API_KEY_SSM_PARAM` | `/{env}/watchpoint/forecast/runpod_api_key` |
 | `SESSION_KEY_SSM_PARAM` | `/{env}/watchpoint/auth/session_key` |
 | `ADMIN_API_KEY_SSM_PARAM` | `/{env}/watchpoint/security/admin_api_key` |
 | `GOOGLE_CLIENT_SECRET_SSM_PARAM` | `/{env}/watchpoint/auth/google_secret` |
 | `GITHUB_CLIENT_SECRET_SSM_PARAM` | `/{env}/watchpoint/auth/github_secret` |
-| `EMAIL_TEMPLATES_JSON_SSM_PARAM` | `/{env}/watchpoint/email/templates_json` |
 
 ---
 
@@ -252,7 +247,6 @@ This matrix guides the "Human Setup" (Doc 13) process.
 | `Billing.StripeSecretKey` | **SecureString** |
 | `Billing.StripeWebhookSecret` | **SecureString** |
 | `Auth.SessionKey` | **SecureString** |
-| `Email.SendGridAPIKey` | **SecureString** |
 | `Forecast.RunPodAPIKey` | **SecureString** |
 | `Security.AdminAPIKey` | **SecureString** |
 | `Forecast.RunPodEndpointID` | *String* |

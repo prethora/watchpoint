@@ -722,7 +722,7 @@ All API errors return this structure:
 
 **Upstream Errors (502/503):**
 - `upstream_stripe_unavailable` — Cannot reach Stripe
-- `upstream_email_provider_unavailable` — Cannot reach SendGrid/SES
+- `upstream_email_provider_unavailable` — Cannot reach AWS SES
 - `upstream_forecast_unavailable` — Cannot read forecast data
 
 ---
@@ -735,7 +735,7 @@ All API errors return this structure:
 | **Webhook Delivery** | Explicit in worker code | 3 | 1s, 5s, 30s (exponential) |
 | **Email Delivery** | Delegated to provider | Per provider | Per provider |
 | **External API (Stripe)** | Explicit in code | 3 | 1s, 2s, 4s (exponential) |
-| **External API (SendGrid)** | Explicit in code | 3 | 1s, 2s, 4s (exponential) |
+| **External API (AWS SES)** | Explicit in code | 3 | 1s, 2s, 4s (exponential) |
 | **Database Operations** | Connection retry only | 2 | 100ms fixed |
 | **S3 Operations** | AWS SDK automatic | 3 | SDK default (exponential) |
 | **RunPod Inference** | Explicit in poller | 3 | 30s, 60s, 120s |

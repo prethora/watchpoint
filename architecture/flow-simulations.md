@@ -659,7 +659,7 @@
 
 **Primary Components**: `api` (Webhook Handler), `worker/email` (Bounce Processor)
 
-**Trigger**: SendGrid sends `bounce` webhook to API.
+**Trigger**: SES sends bounce notification via SNS.
 
 **Preconditions**:
 *   A WatchPoint exists with the bouncing email address.
@@ -1306,7 +1306,7 @@
 
 ## USER-004: User Invite
 
-**Primary Components**: `api` (`UserHandler`), `internal/db`, `external/sendgrid`
+**Primary Components**: `api` (`UserHandler`), `internal/db`, `external/ses`
 
 **Trigger**: `POST /v1/users/invite`
 
@@ -1321,8 +1321,8 @@
     *   **[DB]** `INSERT INTO users (..., status='invited')`.
     *   **[Error Handling]** If DB returns Unique Violation on email: Return **409 Conflict** ("User already exists").
 5.  **[Handler]** Calls `EmailService.SendInvite(ctx, email, token)`.
-    *   **[SendGrid]** Sends template email.
-    *   **[Error Handling]** If SendGrid fails: Return **500**. (Admin sees error, user not confused by missing email).
+    *   **[SES]** Sends email via AWS SES.
+    *   **[Error Handling]** If SES fails: Return **500**. (Admin sees error, user not confused by missing email).
 6.  **[Handler]** Emits `user.invited` to Audit Log.
 7.  **[Handler]** Returns `201 Created`.
 
@@ -1452,7 +1452,7 @@
 
 ## USER-008: Password Reset
 
-**Primary Components**: `api` (`AuthHandler`), `internal/auth`, `external/sendgrid`
+**Primary Components**: `api` (`AuthHandler`), `internal/auth`, `external/ses`
 
 **Trigger**: `POST /auth/forgot-password` AND `POST /auth/reset-password`
 
@@ -1464,7 +1464,7 @@
 4.  **[Service]** Persists Token.
     *   **[DB]** `INSERT INTO password_resets (user_id, token_hash, expires_at) ...`
 5.  **[Service]** Sends Email.
-    *   **[External]** SendGrid: Sends link with `RawToken`.
+    *   **[External]** SES: Sends link with `RawToken`.
 
 **Phase 2: Complete**
 1.  **[Handler]** Validates inputs (New Password complexity).
@@ -1652,7 +1652,7 @@
 
 ## USER-014: Notify Owner on Email Bounces
 
-**Primary Components**: `worker/email` (`BounceProcessor`), `internal/db`, `external/sendgrid`
+**Primary Components**: `worker/email` (`BounceProcessor`), `internal/db`, `external/ses`
 
 **Trigger**: `NOTIF-006` (Bounce Handling) logic detects failure count >= 3.
 
@@ -1669,7 +1669,7 @@
     *   `To`: Owner Email.
     *   `Template`: Bounce Warning.
     *   `Variables`: WatchPoint Name, Channel Address.
-5.  **[SendGrid]** Sends alert email.
+5.  **[SES]** Sends alert email.
 
 **Data State Changes**:
 *   **DB**: WatchPoint updated (channel disabled).

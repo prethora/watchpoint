@@ -266,7 +266,7 @@ Database Unavailable
 | SQS (DLQ) | Queue | Failed messages for review |
 | CloudWatch | Metrics | Observability data |
 | Stripe | External | Billing, subscriptions |
-| SendGrid/SES | External | Email delivery |
+| AWS SES | External | Email delivery |
 
 ---
 
@@ -767,7 +767,7 @@ def is_new_threat(hash, seen_hashes, max_age_hours=48):
    - Format payload for channel type
    - If webhook: detect platform and format (→ NOTIF-007)
    - Deliver:
-     - Email: Send via SendGrid/SES
+     - Email: Send via AWS SES
      - Webhook: POST with signature
 5. Record delivery attempt in notification_deliveries
 6. If all channels succeed: mark notification as 'delivered'
@@ -779,7 +779,7 @@ def is_new_threat(hash, seen_hashes, max_age_hours=48):
 DB Reads:   notifications, watchpoints, organizations
 DB Writes:  notifications (status), notification_deliveries
 SQS Recv:   notification-queue
-External:   SendGrid/SES (email), Customer webhooks
+External:   AWS SES (email), Customer webhooks
 ```
 
 **Downstream**: HOOK-005 (delivery tracking on success)
@@ -888,7 +888,7 @@ def compare_to_previous(current, previous):
 **Trigger**: Email provider reports bounce
 
 **Steps**:
-1. Receive bounce webhook from SendGrid/SES
+1. Receive bounce notification from SES via SNS
 2. Identify affected email channel
 3. Increment bounce_count on channel
 4. If bounce_count >= 3:

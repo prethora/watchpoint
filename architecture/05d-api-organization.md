@@ -43,7 +43,7 @@ type TokenService interface {
     Generate() (token string, tokenHash string, err error)
 }
 
-// EmailService abstracts the transactional email provider (SendGrid).
+// EmailService abstracts the transactional email provider (AWS SES).
 type EmailService interface {
     SendInvite(ctx context.Context, toEmail string, inviteURL string, role types.UserRole) error
 }
@@ -323,7 +323,7 @@ type UpdateUserRequest struct {
     *   Generates secure token. Hashes token for DB. Sends raw token in email link.
     *   Creates user with `status='invited'`.
     *   **Duplicate Handling**: Catch unique constraint violation on email. Return **409 Conflict** with message `{"error": "User already exists"}`.
-    *   **Email Delivery**: Send invite email synchronously via `EmailService.SendInvite`. Return **500 Internal Server Error** if SendGrid fails to ensure the admin knows the invite did not go out.
+    *   **Email Delivery**: Send invite email synchronously via `EmailService.SendInvite`. Return **500 Internal Server Error** if SES fails to ensure the admin knows the invite did not go out.
 2.  **Resend Invite**:
     *   Regenerates token for existing `invited` user. Updates expiry. Resends email.
 3.  **Role Transition Matrix**:

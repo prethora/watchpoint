@@ -1,6 +1,6 @@
 # 08b - Email Worker
 
-> **Purpose**: Defines the Email Worker responsible for delivering notifications via transactional email providers (e.g., SendGrid, SES). It handles template data preparation, provider-side rendering, rate limiting, and asynchronous feedback processing (bounces/complaints).
+> **Purpose**: Defines the Email Worker responsible for delivering notifications via AWS SES. It handles client-side template rendering (Go `html/template` + `text/template` with `go:embed`), rate limiting, and asynchronous feedback processing (bounces/complaints via SNS).
 > **Package**: `worker/email`
 > **Dependencies**: `08a-notification-core.md` (Interfaces), `10-external-integrations.md` (Provider Impl), `01-foundation-types.md`, `02-foundation-db.md` (UserRepository)
 
@@ -22,13 +22,13 @@
 
 ## 1. Overview
 
-The Email Worker consumes messages from the Notification Queue (`SQS`), processes them using the core notification logic, and dispatches them to an external email provider. Unlike generic webhooks, email delivery requires complex template rendering (handled provider-side) and asynchronous status tracking (handling bounces/spam reports).
+The Email Worker consumes messages from the Notification Queue (`SQS`), processes them using the core notification logic, and dispatches them to AWS SES for delivery. Template rendering is performed client-side using Go `html/template` and `text/template` with embedded templates via `go:embed`. Asynchronous status tracking (bounces/complaints) is handled via SNS notifications from SES.
 
 ### Responsibilities
 *   **Adapter Pattern**: Implements the `core.NotificationChannel` interface.
-*   **Data Preparation**: Converts domain objects (WatchPoints, Forecasts) into flattened template variables, handling timezone conversions.
-*   **Provider Integration**: Abstracts the specific email service (SendGrid/SES).
-*   **Feedback Loop**: Processes webhooks from providers to disable bad channels (hard bounces).
+*   **Template Rendering**: Client-side rendering using a `Renderer` struct with embedded Go templates. Converts domain objects (WatchPoints, Forecasts) into rendered HTML/text email bodies, handling timezone conversions.
+*   **Provider Integration**: Sends pre-rendered emails via AWS SES (v2 SDK). Auth is via IAM roles (no API key needed).
+*   **Feedback Loop**: Processes bounce/complaint events from SES via SNS (`ParseSNSBounceEvent`) to disable bad channels (hard bounces).
 *   **Safety**: Enforces PII redaction in logs and respects global test mode.
 
 ---
@@ -48,7 +48,7 @@ type EmailWorker struct {
 // EmailChannel implements core.NotificationChannel
 type EmailChannel struct {
     provider        EmailProvider
-    templates       TemplateService
+    renderer        *Renderer
     deliveryRepo    core.DeliveryManager
     defaultFromAddr string
 }
@@ -66,67 +66,51 @@ The Lambda handler performs the following high-level orchestration:
 
 ## 3. Template Architecture
 
-We utilize **Provider-Side Rendering** (e.g., SendGrid Dynamic Templates) to allow non-engineers to manage layout and copy. The worker's job is to map internal states to external Template IDs and prepare the data payload.
+We utilize **Client-Side Rendering** using Go `html/template` and `text/template` with templates embedded via `//go:embed`. This approach keeps templates version-controlled alongside the code, eliminates external template management dependencies, and enables type-safe template data.
 
-### 3.1 Template Configuration
+### 3.1 Renderer
+
+The `Renderer` struct handles template loading and rendering. Templates are organized by template set and event type.
 
 ```go
-// TemplateConfig maps internal logic to provider IDs
-type TemplateConfig struct {
-    // Key: TemplateSet Name (e.g., "default", "wedding")
-    // Value: Map of EventType -> Provider Template ID (e.g., "d-12345...")
-    Sets map[string]map[types.EventType]string `json:"sets"`
+// RenderedEmail holds the output of template rendering.
+type RenderedEmail struct {
+    Subject  string
+    BodyHTML string
+    BodyText string
 }
 
-func (c *TemplateConfig) Validate() error {
-    // Ensures "default" set exists and covers all critical EventTypes
-    return nil
+// Renderer loads and renders embedded email templates.
+type Renderer struct {
+    // Embedded templates loaded from go:embed filesystem
+    templates map[string]map[types.EventType]*template.Template
 }
+
+// Render produces a RenderedEmail for the given template set, event type, and notification.
+//
+// **Soft-Fail Fallback Logic (VERT-004)**: If the named template set (e.g., "wedding")
+// cannot be resolved, the implementation MUST automatically retry using the "default"
+// template set before returning an error.
+//
+// Resolution order:
+//   1. Attempt: Render(requestedSet, eventType, notification)
+//   2. Fallback: Render("default", eventType, notification) if step 1 fails
+//   3. Error: Return error only if both attempts fail
+func (r *Renderer) Render(set string, eventType types.EventType, n *types.Notification) (*RenderedEmail, types.SenderIdentity, error)
 ```
-
-### 3.2 Template Service
-
-Responsible for data transformation and timezone localization.
-
-```go
-type TemplateData map[string]interface{}
 
 *`SenderIdentity` is consolidated in `01-foundation-types.md` (Section 10.4).*
 
 This module uses `types.SenderIdentity` for email sender information.
 
-type TemplateService interface {
-    // Resolve returns the provider template ID.
-    //
-    // **Soft-Fail Fallback Logic (VERT-004)**: If the named template set (e.g., "wedding")
-    // cannot be resolved (not found in TemplateConfig or provider returns error), the
-    // implementation MUST automatically retry resolution using the "default" template set
-    // before returning an error. This ensures notifications are delivered even if specific
-    // vertical templates are misconfigured or not yet provisioned.
-    //
-    // Resolution order:
-    //   1. Attempt: Resolve(requestedSet, eventType)
-    //   2. Fallback: Resolve("default", eventType) if step 1 fails
-    //   3. Error: Return error only if both attempts fail
-    Resolve(set string, eventType types.EventType) (string, error)
-
-    // Prepare converts the notification into flat variables.
-    // - Extracts 'timezone' from n.Payload (defaulting to UTC if missing).
-    // - Converts UTC timestamps to human-readable strings in that timezone.
-    // - Formats numbers (e.g., "0.55" -> "55%").
-    // - Determines Sender Name based on TemplateSet.
-    Prepare(n *types.Notification) (TemplateData, SenderIdentity, error)
-}
-```
-
 **Timezone Handling**:
-The `Prepare` method relies on the `timezone` key being present in the `Notification.Payload` map (populated by the Eval Worker). If invalid or missing, it defaults to UTC. It uses standard layouts (e.g., "Mon, Jan 2 at 3:04 PM") for formatting time strings passed to the template.
+The `Render` method relies on the `timezone` key being present in the `Notification.Payload` map (populated by the Eval Worker). If invalid or missing, it defaults to UTC. It uses standard layouts (e.g., "Mon, Jan 2 at 3:04 PM") for formatting time strings in the rendered output.
 
 ---
 
 ## 4. Provider Interface
 
-This interface decouples the worker from the specific API (SendGrid, SES, Postmark). The implementation resides in `10-external-integrations.md`.
+This interface decouples the worker from the specific email provider. The SES implementation resides in `10-external-integrations.md`.
 
 ```go
 // Errors
@@ -178,29 +162,25 @@ func (e *EmailChannel) Deliver(ctx context.Context, payload []byte, destination 
         }, nil
     }
 
-    // 4. Prepare Template Data (with Soft-Fail Fallback - VERT-004)
-    // The Resolve method implements automatic fallback to "default" template set
+    // 4. Render Template (with Soft-Fail Fallback - VERT-004)
+    // The Render method implements automatic fallback to "default" template set
     // if the requested template set cannot be resolved.
-    tmplID, err := e.templates.Resolve(n.TemplateSet, n.EventType)
+    rendered, sender, err := e.renderer.Render(n.TemplateSet, n.EventType, &n)
     if err != nil {
         // Both requested set and default fallback failed - permanent failure
-        e.logger.Error("template resolution failed for all sets",
+        e.logger.Error("template rendering failed for all sets",
             "requested_set", n.TemplateSet, "event_type", n.EventType, "error", err)
         return nil, err
     }
-    
-    data, sender, err := e.templates.Prepare(&n)
-    if err != nil {
-        return nil, err
-    }
 
-    // 5. Send via Provider
+    // 5. Send via Provider (SES)
     msgID, err := e.provider.Send(ctx, SendInput{
-        To:           destination,
-        From:         sender,
-        TemplateID:   tmplID,
-        TemplateData: data,
-        ReferenceID:  n.ID,
+        To:          destination,
+        From:        sender,
+        Subject:     rendered.Subject,
+        BodyHTML:    rendered.BodyHTML,
+        BodyText:    rendered.BodyText,
+        ReferenceID: n.ID,
     })
 
     // 6. Handle Synchronous Failures
@@ -249,7 +229,7 @@ func (w *EmailWorker) handleTerminalFailure(ctx context.Context, notifID, wpID s
 
 ## 6. Feedback Processing (Bounces)
 
-Emails often fail asynchronously. The `BounceProcessor` logic handles webhooks from the provider.
+Emails often fail asynchronously. SES publishes bounce and complaint notifications to an SNS topic. The `BounceProcessor` logic handles these SNS events, parsed via `ParseSNSBounceEvent()`.
 
 ### 6.1 Structures
 
@@ -311,7 +291,7 @@ func (b *BounceProcessor) Process(ctx context.Context, event BounceEvent) error 
 // 4. If 0 rows updated (race condition), refetch and retry.
 ```
 
-*Note: The HTTP handler receiving the webhook resides in the API layer (`10-external-integrations`), which calls this processor.*
+*Note: Bounce/complaint events arrive via SNS notifications from SES. The SNS message is parsed using `ParseSNSBounceEvent()` which normalizes the SES-specific payload into the `BounceEvent` struct.*
 
 ---
 
@@ -326,8 +306,8 @@ func RedactEmail(email string) string {
 ```
 
 ### 7.2 Global Circuit Breaker
-Uses `gobreaker` to detect provider outages.
-*   **Trigger**: Consecutive 5xx errors from `EmailProvider`.
+Uses `gobreaker` to detect SES outages.
+*   **Trigger**: Consecutive errors from `EmailProvider` (SES).
 *   **Action**: Nack messages immediately (preserve in SQS).
 *   **Recovery**: Half-open state tests single delivery before resuming full throughput.
 
@@ -341,17 +321,18 @@ Uses `core.RateLimitHandler`.
 
 This worker requires extensions to the configuration defined in `03-config.md`.
 
-**Required Extension**: The `EmailConfig` struct in `03-config.md` must include a `Templates` field to map template IDs.
+The `EmailConfig` struct in `03-config.md` defines the email provider settings. Template rendering is handled client-side via `go:embed` -- no external template IDs are needed.
 
 ```go
 type EmailConfig struct {
-    // JSON string mapping "template_set" -> "event_type" -> "provider_id"
-    // Example: {"default": {"threshold_crossed": "d-123..."}}
-    Templates       string `envconfig:"EMAIL_TEMPLATES_JSON" validate:"required,json"`
-    DefaultFromAddr string `envconfig:"EMAIL_FROM_ADDRESS"`
-    Provider        string `envconfig:"EMAIL_PROVIDER" default:"sendgrid"`
+    FromAddress string `envconfig:"EMAIL_FROM_ADDRESS" default:"alerts@watchpoint.io"`
+    FromName    string `envconfig:"EMAIL_FROM_NAME" default:"WatchPoint Alerts"`
+    SESRegion   string `envconfig:"SES_REGION" default:"us-east-1"`
+    Provider    string `envconfig:"EMAIL_PROVIDER" default:"ses"`
 }
 ```
+
+**IAM Permissions**: The Email Worker Lambda requires `ses:SendEmail` and `ses:SendRawEmail` permissions (defined in `04-sam-template.md`). No API key or SSM secret is needed for SES authentication.
 
 ---
 

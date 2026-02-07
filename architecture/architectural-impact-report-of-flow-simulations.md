@@ -164,7 +164,7 @@ Simulation of failure modes (`NOTIF-004`, `NOTIF-005`) necessitated a more robus
 
 *   **Retry Visibility**: Mandated that workers **MUST update the database** (`status='retrying'`) *before* re-queuing a message to SQS. This ensures the "Last Attempted" timestamp in the dashboard reflects reality during backoff periods, rather than staying stale for minutes.
 *   **Long-Delay Parking**: Defined a protocol for Rate Limits exceeding SQS visibility caps (15 minutes). Workers now "Park" these deliveries in the DB with `status='deferred'`, relying on the `RequeueDeferredNotifications` job to wake them up, rather than looping or dropping them.
-*   **Payload Truncation**: Enforced a "Top N + Link" truncation strategy for both Webhooks and Email Digests to prevent downstream rejection (Slack block limits) or rendering timeouts (SendGrid).
+*   **Payload Truncation**: Enforced a "Top N + Link" truncation strategy for both Webhooks and Email Digests to prevent downstream rejection (Slack block limits) or rendering timeouts (email provider).
 
 ## 4. Concurrency Strategy (`08b-email-worker.md`)
 

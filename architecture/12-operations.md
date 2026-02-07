@@ -298,7 +298,7 @@ COMMIT;
 Configured via SSM Parameters loaded by `03-config.md`.
 
 *   `/prod/watchpoint/features/enable_nowcast`: Set `false` to stop expensive GPU runs.
-*   `/prod/watchpoint/features/enable_email`: Set `false` to stop SendGrid output during incidents.
+*   `/prod/watchpoint/features/enable_email`: Set `false` to stop SES email output during incidents.
 
 ---
 

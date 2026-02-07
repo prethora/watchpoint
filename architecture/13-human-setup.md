@@ -102,17 +102,16 @@ The guide uses the following schema for AI-to-Human interactions:
 *   **Secondary Prompt**: "Now paste the **Publishable Key** (`pk_...`):"
 *   **Store**: `VAR_STRIPE_PUB`
 
-### 3.3 SendGrid (Email)
+### 3.3 AWS SES (Email)
 
-*   **Context**: Transactional email delivery.
-*   **Prompt**:
-    > "1. Go to SendGrid > Settings > API Keys > Create API Key (Full Access).
-    > 2. Paste the Key (`SG...`) here:"
-*   **Validation**: `curl -s -H "Authorization: Bearer $INPUT" https://api.sendgrid.com/v3/user/credits | grep "remain"`
-*   **Store**: `VAR_SENDGRID_KEY`
+*   **Context**: Transactional email delivery via AWS SES. SES uses IAM-based authentication, so no API key provisioning is needed.
+*   **Prerequisite**: The AWS account must have SES production access (out of sandbox). If still in sandbox, request production access via the AWS SES console.
 *   **Blocking Step**:
-    > "Go to Settings > Sender Authentication. Verify a **Single Sender** (e.g., `alerts@watchpoint.io`). I will wait until this is verified."
-    *   *Action*: Poll `GET /v3/verified_senders` every 30s until valid.
+    > "1. Go to AWS SES Console > Verified Identities.
+    > 2. Verify the sender domain or email address (e.g., `alerts@watchpoint.io`).
+    > 3. Wait for verification to complete (domain verification may take up to 72 hours for DNS propagation)."
+    *   *Action*: Check `aws sesv2 get-email-identity --email-identity alerts@watchpoint.io` for verification status.
+*   **Note**: No SSM parameter is needed for SES. The Email Worker Lambda authenticates via its IAM role, which includes `ses:SendEmail` and `ses:SendRawEmail` permissions (defined in `04-sam-template.md`).
 
 ### 3.4 RunPod (GPU Inference)
 
@@ -151,7 +150,6 @@ The guide uses the following schema for AI-to-Human interactions:
 | Database URL | `/{env}/watchpoint/database/url` | SecureString | `VAR_DB_URL` |
 | Stripe Secret | `/{env}/watchpoint/billing/stripe_secret_key` | SecureString | `VAR_STRIPE_SECRET` |
 | Stripe Public | `/{env}/watchpoint/billing/stripe_publishable_key` | String | `VAR_STRIPE_PUB` |
-| SendGrid Key | `/{env}/watchpoint/email/sendgrid_api_key` | SecureString | `VAR_SENDGRID_KEY` |
 | RunPod Key | `/{env}/watchpoint/forecast/runpod_api_key` | SecureString | `VAR_RUNPOD_KEY` |
 | Google Secret | `/{env}/watchpoint/auth/google_secret` | SecureString | `VAR_GOOGLE_SECRET` |
 | GitHub Secret | `/{env}/watchpoint/auth/github_secret` | SecureString | `VAR_GITHUB_SECRET` |
