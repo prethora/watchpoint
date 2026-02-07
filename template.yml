@@ -1,0 +1,889 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  WatchPoint - Serverless weather monitoring and alerting platform.
+  Deploys Go (Zip) orchestration/API and Python (Container Image) evaluation workers.
+
+# =============================================================================
+# Parameters
+# =============================================================================
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment.
+
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Optional custom domain (e.g., api.watchpoint.io).
+
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: Optional ACM Certificate ARN for custom domain.
+
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Email address to receive critical alarms (Dead Man's Switch).
+
+  AwsEndpointUrl:
+    Type: String
+    Default: ""
+    Description: Optional AWS SDK endpoint override (used for LocalStack).
+
+  CorsAllowedOrigins:
+    Type: String
+    Default: "*"
+    Description: CORS origin allow list (comma-separated).
+
+  RunPodEndpointId:
+    Type: String
+    Description: ID of the deployed RunPod serverless endpoint.
+
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: OAuth Client ID for Google.
+
+  GithubClientId:
+    Type: String
+    Default: ""
+    Description: OAuth Client ID for GitHub.
+
+  ApiExternalUrl:
+    Type: String
+    Default: ""
+    Description: >
+      Public API URL for OAuth callbacks and email links.
+      When using a custom domain, leave empty to auto-resolve from DomainName.
+      For default API Gateway URLs, set this after initial deployment.
+
+# =============================================================================
+# Conditions
+# =============================================================================
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasApiExternalUrl: !Not [!Equals [!Ref ApiExternalUrl, ""]]
+
+# =============================================================================
+# Globals
+# =============================================================================
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+    Architectures:
+      - arm64
+    LoggingConfig:
+      LogFormat: JSON
+    # NOTE: Log group retention (30 days per spec) is not configurable via SAM
+    # Globals in this SAM CLI version. Retention is set post-deployment via:
+    #   aws logs put-retention-policy --log-group-name <name> --retention-in-days 30
+    # See architecture/12-operations.md for the operational runbook.
+    Environment:
+      Variables:
+        APP_ENV: !Ref Environment
+        AWS_ENDPOINT_URL: !Ref AwsEndpointUrl
+
+        # --- Service Discovery ---
+        # Resolved from: ApiExternalUrl parameter > custom domain > empty (set post-deploy).
+        # After initial deployment, the API Gateway URL is available in stack outputs
+        # and should be set via ApiExternalUrl parameter on subsequent deploys.
+        API_EXTERNAL_URL: !If
+          - HasApiExternalUrl
+          - !Ref ApiExternalUrl
+          - !If
+            - HasCustomDomain
+            - !Sub "https://${DomainName}"
+            - ""
+
+        # --- Core Infrastructure (SSM Pointers) ---
+        DATABASE_URL_SSM_PARAM: !Sub "/${Environment}/watchpoint/database/url"
+
+        # --- Billing (Stripe) ---
+        STRIPE_SECRET_KEY_SSM_PARAM: !Sub "/${Environment}/watchpoint/billing/stripe_secret_key"
+        STRIPE_WEBHOOK_SECRET_SSM_PARAM: !Sub "/${Environment}/watchpoint/billing/stripe_webhook_secret"
+        STRIPE_PUBLISHABLE_KEY_SSM_PARAM: !Sub "/${Environment}/watchpoint/billing/stripe_publishable_key"
+
+        # --- Forecast (RunPod) ---
+        RUNPOD_API_KEY_SSM_PARAM: !Sub "/${Environment}/watchpoint/forecast/runpod_api_key"
+        RUNPOD_ENDPOINT_ID: !Ref RunPodEndpointId
+
+        # --- Auth & Security ---
+        SESSION_KEY_SSM_PARAM: !Sub "/${Environment}/watchpoint/auth/session_key"
+        ADMIN_API_KEY_SSM_PARAM: !Sub "/${Environment}/watchpoint/security/admin_api_key"
+        GOOGLE_CLIENT_ID: !Ref GoogleClientId
+        GOOGLE_CLIENT_SECRET_SSM_PARAM: !Sub "/${Environment}/watchpoint/auth/google_secret"
+        GITHUB_CLIENT_ID: !Ref GithubClientId
+        GITHUB_CLIENT_SECRET_SSM_PARAM: !Sub "/${Environment}/watchpoint/auth/github_secret"
+
+        # --- Queues & Metrics ---
+        METRIC_NAMESPACE: WatchPoint
+        SQS_EVAL_URGENT: !Ref EvalQueueUrgent
+        SQS_EVAL_STANDARD: !Ref EvalQueueStandard
+        SQS_NOTIFICATIONS: !Ref NotificationQueue
+        SQS_DLQ: !Ref DeadLetterQueueShared
+
+# =============================================================================
+# Resources
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 3.1 API Gateway (HTTP API v2)
+  # ---------------------------------------------------------------------------
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins: !Split [",", !Ref CorsAllowedOrigins]
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - Idempotency-Key
+
+  # Custom domain resources (only created when DomainName is provided)
+  ApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref DomainName
+      DomainNameConfigurations:
+        - CertificateArn: !Ref CertificateArn
+          EndpointType: REGIONAL
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: HasCustomDomain
+    DependsOn: ApiDomainName
+    Properties:
+      ApiId: !Ref HttpApi
+      DomainName: !Ref DomainName
+      Stage: $default
+
+  # ---------------------------------------------------------------------------
+  # 3.2 Forecast Bucket (S3)
+  # ---------------------------------------------------------------------------
+  ForecastBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: BatcherFunctionS3Permission
+    Properties:
+      BucketName: !Sub "watchpoint-forecasts-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt BatcherFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: _SUCCESS
+      LifecycleConfiguration:
+        Rules:
+          - Id: IntelligentTiering
+            Status: Enabled
+            Transitions:
+              - StorageClass: INTELLIGENT_TIERING
+                TransitionInDays: 0
+          - Id: NowcastExpiration
+            Status: Enabled
+            Prefix: "nowcast/"
+            ExpirationInDays: 7
+          - Id: MediumRangeExpiration
+            Status: Enabled
+            Prefix: "medium_range/"
+            ExpirationInDays: 90
+
+  # ---------------------------------------------------------------------------
+  # 3.3 Archive Bucket (Cold Storage)
+  # ---------------------------------------------------------------------------
+  ArchiveBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "watchpoint-archive-${Environment}-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: GlacierTransition
+            Status: Enabled
+            Transitions:
+              - StorageClass: GLACIER
+                TransitionInDays: 1
+
+  # ---------------------------------------------------------------------------
+  # 3.4 Container Repository (ECR)
+  # ---------------------------------------------------------------------------
+  EvalWorkerRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "watchpoint/eval-worker-${Environment}"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Retain only last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # ---------------------------------------------------------------------------
+  # 4.1 Dead Letter Queue (Shared)
+  # ---------------------------------------------------------------------------
+  DeadLetterQueueShared:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "watchpoint-dlq-${Environment}"
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  # ---------------------------------------------------------------------------
+  # 4.2 Eval Queue - Urgent (Nowcast)
+  # ---------------------------------------------------------------------------
+  EvalQueueUrgent:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "watchpoint-eval-urgent-${Environment}"
+      VisibilityTimeout: 360  # 6 min (matches 5-min Lambda timeout + buffer)
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueueShared.Arn
+        maxReceiveCount: 3
+
+  # ---------------------------------------------------------------------------
+  # 4.2 Eval Queue - Standard (Medium Range)
+  # ---------------------------------------------------------------------------
+  EvalQueueStandard:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "watchpoint-eval-standard-${Environment}"
+      VisibilityTimeout: 360  # 6 min
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueueShared.Arn
+        maxReceiveCount: 3
+
+  # ---------------------------------------------------------------------------
+  # 4.2 Notification Queue
+  # ---------------------------------------------------------------------------
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "watchpoint-notifications-${Environment}"
+      VisibilityTimeout: 60  # 1 min (matches 30s Lambda timeout + buffer)
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueueShared.Arn
+        maxReceiveCount: 3
+
+  # ---------------------------------------------------------------------------
+  # 4.3 SNS Topic (Alerts)
+  # ---------------------------------------------------------------------------
+  AlertSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "watchpoint-alerts-${Environment}"
+
+  AlertSNSSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertSNSTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ===========================================================================
+  # 5. Compute Resources (Lambdas)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # 5.1 API Function (Go)
+  # ---------------------------------------------------------------------------
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Runtime: provided.al2023
+      CodeUri: cmd/api/
+      Handler: bootstrap
+      Description: WatchPoint HTTP API handler
+      Environment:
+        Variables:
+          FORECAST_BUCKET: !Ref ForecastBucket
+          ARCHIVE_BUCKET: !Ref ArchiveBucket
+      Events:
+        HttpApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: "/{proxy+}"
+            Method: ANY
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt NotificationQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EvalQueueUrgent.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EvalQueueStandard.QueueName
+        - S3ReadPolicy:
+            BucketName: !Ref ForecastBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # 5.1 Batcher Function (Go)
+  # ---------------------------------------------------------------------------
+  BatcherFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Runtime: provided.al2023
+      CodeUri: cmd/batcher/
+      Handler: bootstrap
+      Description: S3 event processor - groups WatchPoints by tile and dispatches eval jobs
+      Environment:
+        Variables:
+          FORECAST_BUCKET: !Sub "watchpoint-forecasts-${Environment}-${AWS::AccountId}"
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/database/*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EvalQueueUrgent.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EvalQueueStandard.QueueName
+        - S3ReadPolicy:
+            BucketName: !Sub "watchpoint-forecasts-${Environment}-${AWS::AccountId}"
+
+  # Permission for S3 to invoke BatcherFunction
+  BatcherFunctionS3Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BatcherFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::watchpoint-forecasts-${Environment}-${AWS::AccountId}"
+      SourceAccount: !Ref "AWS::AccountId"
+
+  # ---------------------------------------------------------------------------
+  # 5.1 Data Poller Function (Go)
+  # ---------------------------------------------------------------------------
+  DataPollerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Runtime: provided.al2023
+      CodeUri: cmd/data-poller/
+      Handler: bootstrap
+      Timeout: 60
+      Description: Polls NOAA S3 buckets for new forecast runs every 15 minutes
+      Environment:
+        Variables:
+          FORECAST_BUCKET: !Ref ForecastBucket
+      Events:
+        PollSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: "rate(15 minutes)"
+            Description: Poll for new forecast data
+            Enabled: true
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ForecastBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/forecast/*"
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/database/*"
+
+  # ---------------------------------------------------------------------------
+  # 5.1 Archiver Function (Go) - Multiplexed Maintenance
+  # ---------------------------------------------------------------------------
+  ArchiverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Runtime: provided.al2023
+      CodeUri: cmd/archiver/
+      Handler: bootstrap
+      Timeout: 60
+      Description: Multiplexed maintenance - archive, digest, billing sync, cleanup
+      Environment:
+        Variables:
+          FORECAST_BUCKET: !Ref ForecastBucket
+          ARCHIVE_BUCKET: !Ref ArchiveBucket
+      Events:
+        ArchiveRule:
+          Type: Schedule
+          Properties:
+            Schedule: "rate(15 minutes)"
+            Description: Archive expired WatchPoints and requeue deferred notifications
+            Input: '{"task": "archive"}'
+            Enabled: true
+        DigestRule:
+          Type: Schedule
+          Properties:
+            Schedule: "rate(1 minute)"
+            Description: Trigger digest generation for current local hour
+            Input: '{"task": "digest_trigger"}'
+            Enabled: true
+        BillingRule:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(0 0 * * ? *)"
+            Description: Daily billing sync with Stripe
+            Input: '{"task": "billing_sync"}'
+            Enabled: true
+        CleanupRule:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(0 2 * * ? *)"
+            Description: Daily cleanup of soft-deleted data
+            Input: '{"task": "cleanup"}'
+            Enabled: true
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt NotificationQueue.QueueName
+        - S3CrudPolicy:
+            BucketName: !Ref ArchiveBucket
+        - S3ReadPolicy:
+            BucketName: !Ref ForecastBucket
+
+  # ---------------------------------------------------------------------------
+  # 5.2 Eval Worker - Urgent (Python, Container Image)
+  # ---------------------------------------------------------------------------
+  EvalWorkerUrgent:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: worker/eval/Dockerfile
+      DockerContext: .
+      DockerTag: latest
+    Properties:
+      PackageType: Image
+      MemorySize: 1024
+      Timeout: 300
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 5
+      Description: Urgent eval worker (Nowcast) - reads Zarr data, evaluates thresholds
+      Environment:
+        Variables:
+          FORECAST_BUCKET: !Ref ForecastBucket
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EvalQueueUrgent.Arn
+            BatchSize: 1
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ForecastBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/database/*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt NotificationQueue.QueueName
+
+  # ---------------------------------------------------------------------------
+  # 5.2 Eval Worker - Standard (Python, Container Image)
+  # ---------------------------------------------------------------------------
+  EvalWorkerStandard:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: worker/eval/Dockerfile
+      DockerContext: .
+      DockerTag: latest
+    Properties:
+      PackageType: Image
+      MemorySize: 1024
+      Timeout: 300
+      ReservedConcurrentExecutions: 50
+      Description: Standard eval worker (Medium Range) - batch eval with cost cap
+      Environment:
+        Variables:
+          FORECAST_BUCKET: !Ref ForecastBucket
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EvalQueueStandard.Arn
+            BatchSize: 10
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ForecastBucket
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/database/*"
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt NotificationQueue.QueueName
+
+  # ---------------------------------------------------------------------------
+  # 5.3 Email Worker Function (Go)
+  # ---------------------------------------------------------------------------
+  EmailWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Runtime: provided.al2023
+      CodeUri: cmd/email-worker/
+      Handler: bootstrap
+      Description: Processes notification queue messages and sends emails via SES
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt NotificationQueue.Arn
+            BatchSize: 10
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # 5.3 Webhook Worker Function (Go)
+  # ---------------------------------------------------------------------------
+  WebhookWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Runtime: provided.al2023
+      CodeUri: cmd/webhook-worker/
+      Handler: bootstrap
+      Description: Processes notification queue messages and delivers webhooks
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt NotificationQueue.Arn
+            BatchSize: 10
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub "${Environment}/watchpoint/*"
+
+  # ===========================================================================
+  # 6. External Access (IAM)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # RunPod Service User - writes forecasts to S3
+  # ---------------------------------------------------------------------------
+  RunPodServiceUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "watchpoint-runpod-${Environment}"
+      Policies:
+        - PolicyName: RunPodS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                Resource: !Sub "${ForecastBucket.Arn}/*"
+
+  # ===========================================================================
+  # 7. Observability & Alarms
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # 7.1 Metric Filter: ForecastReady
+  # ---------------------------------------------------------------------------
+  ForecastReadyMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${BatcherFunction}"
+      FilterPattern: "ForecastReady"
+      MetricTransformations:
+        - MetricName: ForecastReady
+          MetricNamespace: WatchPoint
+          MetricValue: "1"
+
+  # ---------------------------------------------------------------------------
+  # 7.2 Dead Man's Switch: Medium Range Stale Alarm
+  # ---------------------------------------------------------------------------
+  MediumRangeStaleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-medium-range-stale-${Environment}"
+      AlarmDescription: "No medium_range ForecastReady event in 8 hours"
+      MetricName: ForecastReady
+      Namespace: WatchPoint
+      Dimensions:
+        - Name: ForecastType
+          Value: medium_range
+      Statistic: Sum
+      Period: 28800  # 8 hours
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.2 Dead Man's Switch: Nowcast Stale Alarm
+  # ---------------------------------------------------------------------------
+  NowcastStaleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-nowcast-stale-${Environment}"
+      AlarmDescription: "No nowcast ForecastReady event in 30 minutes"
+      MetricName: ForecastReady
+      Namespace: WatchPoint
+      Dimensions:
+        - Name: ForecastType
+          Value: nowcast
+      Statistic: Sum
+      Period: 1800  # 30 minutes
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.3 Queue Depth: Eval Standard
+  # ---------------------------------------------------------------------------
+  EvalQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-eval-queue-depth-${Environment}"
+      AlarmDescription: "Eval standard queue depth exceeds 1000"
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt EvalQueueStandard.QueueName
+      Statistic: Maximum
+      Period: 300  # 5 min
+      EvaluationPeriods: 1
+      Threshold: 1000
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.3 Queue Depth: Eval Urgent
+  # ---------------------------------------------------------------------------
+  EvalQueueUrgentDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-eval-urgent-queue-depth-${Environment}"
+      AlarmDescription: "Eval urgent queue depth exceeds 100"
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt EvalQueueUrgent.QueueName
+      Statistic: Maximum
+      Period: 300  # 5 min
+      EvaluationPeriods: 1
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.3 Queue Depth: Notification Queue
+  # ---------------------------------------------------------------------------
+  NotificationQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-notification-queue-depth-${Environment}"
+      AlarmDescription: "Notification queue depth exceeds 500"
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt NotificationQueue.QueueName
+      Statistic: Maximum
+      Period: 300  # 5 min
+      EvaluationPeriods: 1
+      Threshold: 500
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.4 Notification Spike Alarm
+  # ---------------------------------------------------------------------------
+  NotificationSpikeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-notification-spike-${Environment}"
+      AlarmDescription: >
+        Triggers when notification delivery attempts exceed 1000 in 5 minutes,
+        indicating potential notification loop or spam.
+      MetricName: DeliveryAttempt
+      Namespace: WatchPoint
+      Statistic: Sum
+      Period: 300  # 5 min
+      EvaluationPeriods: 1
+      Threshold: 1000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.5 Security Abuse: API Key Creation Metric Filter
+  # ---------------------------------------------------------------------------
+  SecurityAbuseMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      FilterPattern: '{ $.action = "apikey.created" }'
+      MetricTransformations:
+        - MetricName: APIKeyCreated
+          MetricNamespace: WatchPoint
+          MetricValue: "1"
+
+  # ---------------------------------------------------------------------------
+  # 7.5 Security Abuse: Suspicious Key Creation Alarm
+  # ---------------------------------------------------------------------------
+  SuspiciousKeyCreationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-suspicious-key-creation-${Environment}"
+      AlarmDescription: >
+        Triggers when API key creation exceeds 10 in 5 minutes,
+        indicating potential account compromise or abuse.
+      MetricName: APIKeyCreated
+      Namespace: WatchPoint
+      Statistic: Sum
+      Period: 300  # 5 min
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+  # ---------------------------------------------------------------------------
+  # 7.6 Data Corruption: Corrupt Forecast Metric Filter (Urgent)
+  # ---------------------------------------------------------------------------
+  CorruptForecastMetricFilterUrgent:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EvalWorkerUrgent}"
+      FilterPattern: "ZarrChecksumError"
+      MetricTransformations:
+        - MetricName: CorruptForecast
+          MetricNamespace: WatchPoint
+          MetricValue: "1"
+
+  # ---------------------------------------------------------------------------
+  # 7.6 Data Corruption: Corrupt Forecast Metric Filter (Standard)
+  # ---------------------------------------------------------------------------
+  CorruptForecastMetricFilterStandard:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EvalWorkerStandard}"
+      FilterPattern: "ZarrChecksumError"
+      MetricTransformations:
+        - MetricName: CorruptForecast
+          MetricNamespace: WatchPoint
+          MetricValue: "1"
+
+  # ---------------------------------------------------------------------------
+  # 7.6 Data Corruption: Corrupt Forecast Alarm
+  # ---------------------------------------------------------------------------
+  CorruptForecastAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "watchpoint-corrupt-forecast-${Environment}"
+      AlarmDescription: >
+        CRITICAL: Alerts on forecast data corruption (Zarr checksum or format errors).
+        Requires manual intervention to investigate and rebuild affected forecast data.
+        Corrupted tiles cannot be recovered by automatic retry.
+      MetricName: CorruptForecast
+      Namespace: WatchPoint
+      Statistic: Sum
+      Period: 300  # 5 min
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertSNSTopic
+
+# =============================================================================
+# 8. Outputs
+# =============================================================================
+Outputs:
+  ApiEndpoint:
+    Description: URL of the HTTP API
+    Value: !If
+      - HasCustomDomain
+      - !Sub "https://${DomainName}"
+      - !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+  ForecastBucketName:
+    Description: Name of the forecast S3 bucket
+    Value: !Ref ForecastBucket
+
+  ArchiveBucketName:
+    Description: Name of the archive S3 bucket for cold storage
+    Value: !Ref ArchiveBucket
+
+  RunPodUserArn:
+    Description: ARN of the IAM User for RunPod
+    Value: !GetAtt RunPodServiceUser.Arn
+
+  EvalWorkerRepositoryUri:
+    Description: ECR URI for pushing Python eval worker images
+    Value: !GetAtt EvalWorkerRepository.RepositoryUri
+
+  NotificationQueueUrl:
+    Description: URL of the notification SQS queue
+    Value: !Ref NotificationQueue
+
+  EvalQueueUrgentUrl:
+    Description: URL of the urgent evaluation SQS queue
+    Value: !Ref EvalQueueUrgent
+
+  EvalQueueStandardUrl:
+    Description: URL of the standard evaluation SQS queue
+    Value: !Ref EvalQueueStandard
+
+  AlertSNSTopicArn:
+    Description: ARN of the SNS topic for operational alerts
+    Value: !Ref AlertSNSTopic

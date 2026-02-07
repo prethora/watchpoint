@@ -32,6 +32,7 @@
 #   GOOGLE_CLIENT_ID  - (Optional) Google OAuth client ID.
 #   GITHUB_CLIENT_ID  - (Optional) GitHub OAuth client ID.
 #   CORS_ORIGINS      - (Optional) CORS allowed origins. Defaults to "*".
+#   API_EXTERNAL_URL  - (Optional) Public API URL for OAuth callbacks. Set after initial deploy.
 #   OUTPUT_FILE       - (Optional) Output path. Defaults to samconfig.toml in project root.
 #   ECR_REPO_NAME     - (Optional) ECR repository name. Defaults to watchpoint/eval-worker.
 #
@@ -168,6 +169,7 @@ resolve_config() {
     GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
     GITHUB_CLIENT_ID="${GITHUB_CLIENT_ID:-}"
     CORS_ORIGINS="${CORS_ORIGINS:-*}"
+    API_EXTERNAL_URL="${API_EXTERNAL_URL:-}"
     OUTPUT_FILE="${OUTPUT_FILE:-${PROJECT_ROOT}/samconfig.toml}"
 
     if [[ -z "${ALERT_EMAIL}" ]]; then
@@ -236,6 +238,10 @@ generate_env_section() {
 
     if [[ "${env_cors}" != "*" ]]; then
         param_overrides="${param_overrides} CorsAllowedOrigins=${env_cors}"
+    fi
+
+    if [[ -n "${API_EXTERNAL_URL}" ]]; then
+        param_overrides="${param_overrides} ApiExternalUrl=${API_EXTERNAL_URL}"
     fi
 
     # Write the TOML section
