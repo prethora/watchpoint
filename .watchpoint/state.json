@@ -2583,11 +2583,11 @@
           "FCST-001"
         ],
         "definition_of_done": "Script runs, creates keys, and populates SSM without leaking secrets to stdout.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-07T20:03:57.983399+00:00",
+        "completed_at": "2026-02-07T20:08:20.903889+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
