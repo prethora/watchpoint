@@ -28,6 +28,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/google/uuid"
 
+	"watchpoint/internal/config"
 	"watchpoint/internal/scheduler"
 )
 
@@ -399,6 +400,14 @@ func main() {
 	}))
 
 	logger.Info("Archiver Lambda initializing (cold start)")
+
+	// Resolve SSM secrets into environment variables before reading config.
+	// In non-local environments, secrets like DATABASE_URL are stored in SSM
+	// Parameter Store and referenced via _SSM_PARAM suffix variables.
+	if err := config.ResolveSecrets(config.NewSSMProvider(os.Getenv("AWS_REGION"))); err != nil {
+		logger.Error("Failed to resolve SSM secrets", "error", err)
+		os.Exit(1)
+	}
 
 	// Generate a unique worker ID for this Lambda instance.
 	// Used for distributed lock ownership tracking.

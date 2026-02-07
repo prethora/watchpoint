@@ -46,9 +46,14 @@ func main() {
 
 // run encapsulates the startup lifecycle so that main() can cleanly exit on error.
 func run() error {
-	// Load configuration. For local development, pass nil as the SecretProvider
-	// since SSM resolution is bypassed when APP_ENV=local.
-	cfg, err := config.LoadConfig(nil)
+	// Load configuration. For non-local environments, create a real SSMProvider
+	// to resolve secrets from AWS SSM Parameter Store. For local development,
+	// SSM resolution is bypassed when APP_ENV=local (nil provider is safe).
+	var secretProvider config.SecretProvider
+	if os.Getenv("APP_ENV") != "local" {
+		secretProvider = config.NewSSMProvider(os.Getenv("AWS_REGION"))
+	}
+	cfg, err := config.LoadConfig(secretProvider)
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
 	}

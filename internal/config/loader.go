@@ -149,6 +149,27 @@ func loadConfigWithDeps(provider SecretProvider, deps loaderDeps) (*Config, erro
 	return &cfg, nil
 }
 
+// ResolveSecrets performs the SSM secret resolution step in isolation, without
+// loading or validating the full Config struct. It scans environment variables
+// for _SSM_PARAM suffixed entries, fetches the secret values via the provider,
+// and injects the resolved values back into the OS environment.
+//
+// This function is intended for Lambda entry points (e.g., batcher, data-poller)
+// that read individual env vars via os.Getenv() instead of using LoadConfig().
+// It should be called early in main(), before any os.Getenv() calls that depend
+// on SSM-resolved values.
+//
+// If APP_ENV is "local", this function is a no-op (SSM resolution is skipped).
+// If there are no _SSM_PARAM variables in the environment, this function is also
+// a no-op.
+func ResolveSecrets(provider SecretProvider) error {
+	appEnv, _ := os.LookupEnv("APP_ENV")
+	if appEnv == localEnv {
+		return nil
+	}
+	return resolveSSMParams(provider, defaultDeps())
+}
+
 // resolveSSMParams scans the environment for variables ending in _SSM_PARAM,
 // fetches the corresponding secret values via the SecretProvider, and injects
 // them back into the environment so that envconfig can process them.

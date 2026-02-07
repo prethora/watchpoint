@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"watchpoint/internal/config"
 	"watchpoint/internal/db"
 	"watchpoint/internal/external"
 	"watchpoint/internal/forecasts"
@@ -40,6 +41,14 @@ func main() {
 	}))
 
 	logger.Info("DataPoller Lambda initializing (cold start)")
+
+	// Resolve SSM secrets into environment variables before reading config.
+	// In non-local environments, DATABASE_URL and RUNPOD_API_KEY are stored in
+	// SSM Parameter Store and referenced via _SSM_PARAM suffix variables.
+	if err := config.ResolveSecrets(config.NewSSMProvider(os.Getenv("AWS_REGION"))); err != nil {
+		logger.Error("Failed to resolve SSM secrets", "error", err)
+		os.Exit(1)
+	}
 
 	ctx := context.Background()
 

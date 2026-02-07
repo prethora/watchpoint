@@ -326,7 +326,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       Runtime: provided.al2023
-      CodeUri: cmd/api/
+      CodeUri: .
       Handler: bootstrap
       Description: WatchPoint HTTP API handler
       Environment:
@@ -367,7 +367,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       Runtime: provided.al2023
-      CodeUri: cmd/batcher/
+      CodeUri: .
       Handler: bootstrap
       Description: S3 event processor - groups WatchPoints by tile and dispatches eval jobs
       Environment:
@@ -402,7 +402,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       Runtime: provided.al2023
-      CodeUri: cmd/data-poller/
+      CodeUri: .
       Handler: bootstrap
       Timeout: 60
       Description: Polls NOAA S3 buckets for new forecast runs every 15 minutes
@@ -433,7 +433,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       Runtime: provided.al2023
-      CodeUri: cmd/archiver/
+      CodeUri: .
       Handler: bootstrap
       Timeout: 60
       Description: Multiplexed maintenance - archive, digest, billing sync, cleanup
@@ -493,9 +493,9 @@ Resources:
       PackageType: Image
       MemorySize: 1024
       Timeout: 300
-      AutoPublishAlias: live
-      ProvisionedConcurrencyConfig:
-        ProvisionedConcurrentExecutions: 5
+      # AutoPublishAlias: live  # Disabled for dev (account concurrency limit)
+      # ProvisionedConcurrencyConfig:
+      #   ProvisionedConcurrentExecutions: 5
       Description: Urgent eval worker (Nowcast) - reads Zarr data, evaluates thresholds
       Environment:
         Variables:
@@ -527,7 +527,7 @@ Resources:
       PackageType: Image
       MemorySize: 1024
       Timeout: 300
-      ReservedConcurrentExecutions: 50
+      # ReservedConcurrentExecutions: 50  # Disabled for dev (account concurrency limit)
       Description: Standard eval worker (Medium Range) - batch eval with cost cap
       Environment:
         Variables:
@@ -555,7 +555,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       Runtime: provided.al2023
-      CodeUri: cmd/email-worker/
+      CodeUri: .
       Handler: bootstrap
       Description: Processes notification queue messages and sends emails via SES
       Events:
@@ -583,7 +583,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       Runtime: provided.al2023
-      CodeUri: cmd/webhook-worker/
+      CodeUri: .
       Handler: bootstrap
       Description: Processes notification queue messages and delivers webhooks
       Events:
@@ -623,10 +623,38 @@ Resources:
   # ===========================================================================
 
   # ---------------------------------------------------------------------------
+  # 7.0 Log Groups (must exist before metric filters can reference them)
+  # ---------------------------------------------------------------------------
+  BatcherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${BatcherFunction}"
+      RetentionInDays: 30
+
+  ApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      RetentionInDays: 30
+
+  EvalWorkerUrgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EvalWorkerUrgent}"
+      RetentionInDays: 30
+
+  EvalWorkerStandardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${EvalWorkerStandard}"
+      RetentionInDays: 30
+
+  # ---------------------------------------------------------------------------
   # 7.1 Metric Filter: ForecastReady
   # ---------------------------------------------------------------------------
   ForecastReadyMetricFilter:
     Type: AWS::Logs::MetricFilter
+    DependsOn: BatcherFunctionLogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${BatcherFunction}"
       FilterPattern: "ForecastReady"
@@ -768,6 +796,7 @@ Resources:
   # ---------------------------------------------------------------------------
   SecurityAbuseMetricFilter:
     Type: AWS::Logs::MetricFilter
+    DependsOn: ApiFunctionLogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
       FilterPattern: '{ $.action = "apikey.created" }'
@@ -802,6 +831,7 @@ Resources:
   # ---------------------------------------------------------------------------
   CorruptForecastMetricFilterUrgent:
     Type: AWS::Logs::MetricFilter
+    DependsOn: EvalWorkerUrgentLogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${EvalWorkerUrgent}"
       FilterPattern: "ZarrChecksumError"
@@ -815,6 +845,7 @@ Resources:
   # ---------------------------------------------------------------------------
   CorruptForecastMetricFilterStandard:
     Type: AWS::Logs::MetricFilter
+    DependsOn: EvalWorkerStandardLogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${EvalWorkerStandard}"
       FilterPattern: "ZarrChecksumError"

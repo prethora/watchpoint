@@ -255,7 +255,7 @@ s3_bucket = "${ARTIFACT_BUCKET}"
 s3_prefix = "${stack_name}"
 region = "${REGION}"
 confirm_changeset = ${confirm_changeset}
-capabilities = "CAPABILITY_IAM"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
 image_repositories = ["EvalWorkerUrgent=${ECR_URI}", "EvalWorkerStandard=${ECR_URI}"]
 parameter_overrides = "${param_overrides}"
 TOML_SECTION

@@ -47,6 +47,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 
+	"watchpoint/internal/config"
 	"watchpoint/internal/external"
 	"watchpoint/internal/notifications/core"
 	emailpkg "watchpoint/internal/notifications/email"
@@ -478,6 +479,14 @@ func main() {
 	}))
 
 	logger.Info("Email Worker Lambda initializing (cold start)")
+
+	// Resolve SSM secrets into environment variables before reading config.
+	// In non-local environments, secrets are stored in SSM Parameter Store
+	// and referenced via _SSM_PARAM suffix variables.
+	if err := config.ResolveSecrets(config.NewSSMProvider(os.Getenv("AWS_REGION"))); err != nil {
+		logger.Error("Failed to resolve SSM secrets", "error", err)
+		os.Exit(1)
+	}
 
 	// Wrap slog.Logger to satisfy types.Logger interface.
 	typedLogger := &slogAdapter{logger: logger}

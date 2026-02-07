@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"watchpoint/internal/batcher"
+	"watchpoint/internal/config"
 	"watchpoint/internal/db"
 	"watchpoint/internal/types"
 )
@@ -188,6 +189,15 @@ func main() {
 	}))
 
 	logger.Info("Batcher Lambda initializing (cold start)")
+
+	// Resolve SSM secrets into environment variables before reading config.
+	// In non-local environments, DATABASE_URL is stored in SSM Parameter Store
+	// and referenced via DATABASE_URL_SSM_PARAM. This step fetches the actual
+	// values and injects them as env vars so os.Getenv() calls below work.
+	if err := config.ResolveSecrets(config.NewSSMProvider(os.Getenv("AWS_REGION"))); err != nil {
+		logger.Error("Failed to resolve SSM secrets", "error", err)
+		os.Exit(1)
+	}
 
 	// Load AWS SDK configuration.
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())

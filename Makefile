@@ -1,5 +1,7 @@
 .PHONY: test build clean migrate-up migrate-down migrate-cloud mocks lint-python run-job run-stack stop-stack \
-       build-lambda build-images build-all deploy-cloud
+       build-lambda build-images build-all deploy-cloud \
+       build-ApiFunction build-BatcherFunction build-DataPollerFunction \
+       build-ArchiverFunction build-EmailWorkerFunction build-WebhookWorkerFunction
 
 # Git commit SHA used for tagging build artifacts
 SHA := $(shell git rev-parse --short HEAD)
@@ -159,6 +161,31 @@ build-lambda:
 			./cmd/$$cmd; \
 	done
 	@echo "Lambda binaries built in $(DIST_DIR)/"
+
+# ---------------------------------------------------------------------------
+# SAM build targets: invoked by `sam build` via BuildMethod: makefile
+# ---------------------------------------------------------------------------
+# SAM calls `make build-<LogicalId>` for each function with CodeUri: .
+# ARTIFACTS_DIR is set by SAM to the output directory for the function.
+# Each target cross-compiles the corresponding cmd/ package to linux/arm64.
+
+build-ApiFunction:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -ldflags="-s -w" -o $(ARTIFACTS_DIR)/bootstrap ./cmd/api
+
+build-BatcherFunction:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -ldflags="-s -w" -o $(ARTIFACTS_DIR)/bootstrap ./cmd/batcher
+
+build-DataPollerFunction:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -ldflags="-s -w" -o $(ARTIFACTS_DIR)/bootstrap ./cmd/data-poller
+
+build-ArchiverFunction:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -ldflags="-s -w" -o $(ARTIFACTS_DIR)/bootstrap ./cmd/archiver
+
+build-EmailWorkerFunction:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -ldflags="-s -w" -o $(ARTIFACTS_DIR)/bootstrap ./cmd/email-worker
+
+build-WebhookWorkerFunction:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -ldflags="-s -w" -o $(ARTIFACTS_DIR)/bootstrap ./cmd/webhook-worker
 
 # ---------------------------------------------------------------------------
 # Docker images: Build Python worker images with platform enforcement
