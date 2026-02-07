@@ -69,6 +69,10 @@ type BootstrapStep struct {
 	// When true, the input is read without echoing to the terminal.
 	IsSecret bool
 
+	// Optional marks this step as skippable without user confirmation.
+	// When SkipOptional is true in the runner, these steps are auto-skipped.
+	Optional bool
+
 	// Phase groups the step for display purposes (e.g., "External Accounts", "Internal Secrets").
 	Phase string
 }
@@ -141,52 +145,56 @@ func BuildInventory(v *Validator) []BootstrapStep {
 			Phase:      "External Accounts",
 		},
 		{
-			HumanLabel:     "Google Client ID",
+			HumanLabel:     "Google Client ID (optional)",
 			SSMCategoryKey: "auth/google_client_id",
 			ParamType:      ParamString,
 			Source:         SourcePrompt,
 			Prompt: `Use https://placeholder.watchpoint.io as the Authorized Redirect URI for now.
-   Paste Google Client ID:`,
+   Paste Google Client ID (or press Enter to skip):`,
 			ValidateFn: func(ctx context.Context, input string) ValidationResult {
 				return v.ValidateRegex(ctx, input, `.+\.apps\.googleusercontent\.com$`, "Google Client ID")
 			},
 			IsSecret: false,
+			Optional: true,
 			Phase:    "External Accounts",
 		},
 		{
-			HumanLabel:     "Google Client Secret",
+			HumanLabel:     "Google Client Secret (optional)",
 			SSMCategoryKey: "auth/google_secret",
 			ParamType:      ParamSecureString,
 			Source:         SourcePrompt,
-			Prompt:         `Paste Google Client Secret:`,
+			Prompt:         `Paste Google Client Secret (or press Enter to skip):`,
 			ValidateFn: func(ctx context.Context, input string) ValidationResult {
 				return v.ValidateRegex(ctx, input, `^.{10,}$`, "Google Client Secret")
 			},
 			IsSecret: true,
+			Optional: true,
 			Phase:    "External Accounts",
 		},
 		{
-			HumanLabel:     "GitHub Client ID",
+			HumanLabel:     "GitHub Client ID (optional)",
 			SSMCategoryKey: "auth/github_client_id",
 			ParamType:      ParamString,
 			Source:         SourcePrompt,
-			Prompt:         `Paste GitHub Client ID:`,
+			Prompt:         `Paste GitHub Client ID (or press Enter to skip):`,
 			ValidateFn: func(ctx context.Context, input string) ValidationResult {
 				return v.ValidateRegex(ctx, input, `^.{10,}$`, "GitHub Client ID")
 			},
 			IsSecret: false,
+			Optional: true,
 			Phase:    "External Accounts",
 		},
 		{
-			HumanLabel:     "GitHub Client Secret",
+			HumanLabel:     "GitHub Client Secret (optional)",
 			SSMCategoryKey: "auth/github_secret",
 			ParamType:      ParamSecureString,
 			Source:         SourcePrompt,
-			Prompt:         `Paste GitHub Client Secret:`,
+			Prompt:         `Paste GitHub Client Secret (or press Enter to skip):`,
 			ValidateFn: func(ctx context.Context, input string) ValidationResult {
 				return v.ValidateRegex(ctx, input, `^.{10,}$`, "GitHub Client Secret")
 			},
 			IsSecret: true,
+			Optional: true,
 			Phase:    "External Accounts",
 		},
 
@@ -229,6 +237,10 @@ type BootstrapRunner struct {
 	Validator *Validator
 	Stdin     io.Reader
 	Stderr    io.Writer
+
+	// SkipOptional causes all steps marked Optional to be auto-skipped
+	// without prompting. Controlled by the --skip-oauth flag.
+	SkipOptional bool
 
 	// scanner is the shared line scanner for reading stdin throughout the
 	// bootstrap session. It is lazily initialized on first use. Using a
@@ -304,6 +316,13 @@ func (r *BootstrapRunner) processStep(ctx context.Context, step BootstrapStep) (
 	result := stepResult{
 		Label: step.HumanLabel,
 		Path:  path,
+	}
+
+	// Auto-skip optional steps when --skip-oauth is set.
+	if step.Optional && r.SkipOptional {
+		fmt.Fprintf(r.Stderr, "  Skipped (--skip-oauth)\n")
+		result.Action = "skipped"
+		return result, nil
 	}
 
 	// Check if parameter already exists (idempotency per Section 1).
@@ -399,6 +418,10 @@ func (r *BootstrapRunner) promptAndValidate(ctx context.Context, step BootstrapS
 
 		input = strings.TrimSpace(input)
 		if input == "" {
+			// Optional steps skip immediately on empty input without confirmation.
+			if step.Optional {
+				return "", errSkipped
+			}
 			choice, choiceErr := r.promptSkipOrRetry()
 			if choiceErr != nil {
 				return "", fmt.Errorf("reading skip/retry choice for %s: %w", step.HumanLabel, choiceErr)

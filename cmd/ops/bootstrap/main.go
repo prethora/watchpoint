@@ -81,6 +81,7 @@ func main() {
 	envFlag := flag.String("env", "", "Target environment (dev/staging/prod) [required]")
 	profileFlag := flag.String("profile", "watchpoint-deployer", "AWS CLI profile")
 	regionFlag := flag.String("region", "us-east-1", "AWS region")
+	skipOAuthFlag := flag.Bool("skip-oauth", false, "Skip Google and GitHub OAuth credential steps")
 	exportEnvFlag := flag.Bool("export-env", false, "After bootstrap, export SSM parameters to a .env file for local development")
 	exportEnvPath := flag.String("export-env-path", ".env", "Path for the exported .env file (default: .env in project root)")
 
@@ -89,7 +90,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Guides the setup of external accounts and AWS SSM parameters\n")
 		fmt.Fprintf(os.Stderr, "required before the first SAM deployment.\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  bootstrap --env=dev [--profile=NAME] [--region=REGION] [--export-env]\n\n")
+		fmt.Fprintf(os.Stderr, "  bootstrap --env=dev [--profile=NAME] [--region=REGION] [--skip-oauth] [--export-env]\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -136,6 +137,7 @@ func main() {
 
 	// Run the main bootstrap loop.
 	runner := NewBootstrapRunner(bctx)
+	runner.SkipOptional = *skipOAuthFlag
 	if err := runner.Run(ctx); err != nil {
 		logger.Error("bootstrap failed", "error", err)
 		os.Exit(1)
