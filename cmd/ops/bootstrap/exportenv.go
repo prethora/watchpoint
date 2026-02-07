@@ -30,9 +30,6 @@ var ssmToEnvMapping = map[string]string{
 	"billing/stripe_secret_key":      "STRIPE_SECRET_KEY",
 	"billing/stripe_publishable_key": "STRIPE_PUBLISHABLE_KEY",
 
-	// Email (03-config.md Section 2.2 EmailConfig)
-	"email/sendgrid_api_key": "SENDGRID_API_KEY",
-
 	// Forecast (03-config.md Section 2.2 ForecastConfig)
 	"forecast/runpod_api_key":     "RUNPOD_API_KEY",
 	"forecast/runpod_endpoint_id": "RUNPOD_ENDPOINT_ID",
@@ -92,8 +89,8 @@ var localDevDefaults = map[string]string{
 	"SQS_DLQ":                "http://localhost:4566/000000000000/dead-letter-queue-shared",
 	"EMAIL_FROM_ADDRESS":     "alerts@watchpoint.io",
 	"EMAIL_FROM_NAME":        "WatchPoint Alerts",
-	"EMAIL_PROVIDER":         "sendgrid",
-	"EMAIL_TEMPLATES_JSON":   `{"default":{"threshold_crossed":"d-template-001","alert_resolved":"d-template-002"}}`,
+	"EMAIL_PROVIDER":         "ses",
+	"SES_REGION":             "us-east-1",
 	"CORS_ALLOWED_ORIGINS":   "*",
 	"METRIC_NAMESPACE":       "WatchPoint",
 	"ENABLE_TRACING":         "false",

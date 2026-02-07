@@ -38,7 +38,7 @@ func DefaultRetryPolicy() RetryPolicy {
 
 // BaseClient wraps an *http.Client and a circuit breaker to enforce consistent
 // resilience patterns on all outbound HTTP calls. Provider clients (Stripe,
-// SendGrid, OAuth) embed BaseClient to inherit this behavior.
+// OAuth) embed BaseClient to inherit this behavior.
 type BaseClient struct {
 	client      *http.Client
 	breaker     *gobreaker.CircuitBreaker[*http.Response]

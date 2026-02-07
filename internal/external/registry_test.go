@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+
 	"watchpoint/internal/config"
 	"watchpoint/internal/types"
 )
@@ -22,7 +24,7 @@ func TestNewClientRegistry_TestModeReturnsStubs(t *testing.T) {
 		Environment: "dev",
 	}
 
-	reg, err := NewClientRegistry(cfg, testLogger())
+	reg, err := NewClientRegistry(cfg, aws.Config{}, testLogger())
 	if err != nil {
 		t.Fatalf("NewClientRegistry returned error: %v", err)
 	}
@@ -40,9 +42,6 @@ func TestNewClientRegistry_TestModeReturnsStubs(t *testing.T) {
 	if reg.StripeVerifier == nil {
 		t.Fatal("StripeVerifier is nil")
 	}
-	if reg.EmailVerifier == nil {
-		t.Fatal("EmailVerifier is nil")
-	}
 
 	// Verify they are stub implementations.
 	if _, ok := reg.Billing.(*StubBillingService); !ok {
@@ -57,9 +56,6 @@ func TestNewClientRegistry_TestModeReturnsStubs(t *testing.T) {
 	if _, ok := reg.StripeVerifier.(*StubWebhookVerifier); !ok {
 		t.Errorf("StripeVerifier is %T, want *StubWebhookVerifier", reg.StripeVerifier)
 	}
-	if _, ok := reg.EmailVerifier.(*StubEmailVerifier); !ok {
-		t.Errorf("EmailVerifier is %T, want *StubEmailVerifier", reg.EmailVerifier)
-	}
 }
 
 // TestNewClientRegistry_LocalEnvReturnsStubs verifies that when Environment is
@@ -70,7 +66,7 @@ func TestNewClientRegistry_LocalEnvReturnsStubs(t *testing.T) {
 		Environment: "local",
 	}
 
-	reg, err := NewClientRegistry(cfg, testLogger())
+	reg, err := NewClientRegistry(cfg, aws.Config{}, testLogger())
 	if err != nil {
 		t.Fatalf("NewClientRegistry returned error: %v", err)
 	}
@@ -95,9 +91,6 @@ func TestNewClientRegistry_ProductionReturnsRealClients(t *testing.T) {
 		Billing: config.BillingConfig{
 			StripeSecretKey: types.SecretString("sk_test_fake"),
 		},
-		Email: config.EmailConfig{
-			SendGridAPIKey: types.SecretString("SG.fake_key"),
-		},
 		Auth: config.AuthConfig{
 			GoogleClientID:     "google-client-id",
 			GoogleClientSecret: types.SecretString("google-secret"),
@@ -109,7 +102,7 @@ func TestNewClientRegistry_ProductionReturnsRealClients(t *testing.T) {
 		},
 	}
 
-	reg, err := NewClientRegistry(cfg, testLogger())
+	reg, err := NewClientRegistry(cfg, aws.Config{}, testLogger())
 	if err != nil {
 		t.Fatalf("NewClientRegistry returned error: %v", err)
 	}
@@ -118,17 +111,14 @@ func TestNewClientRegistry_ProductionReturnsRealClients(t *testing.T) {
 	if _, ok := reg.Billing.(*StripeClient); !ok {
 		t.Errorf("Billing is %T, want *StripeClient", reg.Billing)
 	}
-	if _, ok := reg.Email.(*SendGridClient); !ok {
-		t.Errorf("Email is %T, want *SendGridClient", reg.Email)
+	if _, ok := reg.Email.(*SESClient); !ok {
+		t.Errorf("Email is %T, want *SESClient", reg.Email)
 	}
 	if _, ok := reg.OAuth.(*OAuthManagerImpl); !ok {
 		t.Errorf("OAuth is %T, want *OAuthManagerImpl", reg.OAuth)
 	}
 	if _, ok := reg.StripeVerifier.(*StripeVerifier); !ok {
 		t.Errorf("StripeVerifier is %T, want *StripeVerifier", reg.StripeVerifier)
-	}
-	if _, ok := reg.EmailVerifier.(*SendGridVerifier); !ok {
-		t.Errorf("EmailVerifier is %T, want *SendGridVerifier", reg.EmailVerifier)
 	}
 }
 
@@ -140,7 +130,7 @@ func TestNewClientRegistry_NilLoggerDefaultsToSlog(t *testing.T) {
 		Environment: "dev",
 	}
 
-	reg, err := NewClientRegistry(cfg, nil)
+	reg, err := NewClientRegistry(cfg, aws.Config{}, nil)
 	if err != nil {
 		t.Fatalf("NewClientRegistry returned error: %v", err)
 	}
@@ -205,7 +195,7 @@ func TestStubEmailProvider_Send(t *testing.T) {
 	msgID, err := stub.Send(context.Background(), types.SendInput{
 		To:          "recipient@example.com",
 		From:        types.SenderIdentity{Address: "alerts@watchpoint.io", Name: "WatchPoint"},
-		TemplateID:  "d-123456",
+		Subject:     "Test Alert",
 		ReferenceID: "ref_abc",
 	})
 	if err != nil {
@@ -239,7 +229,6 @@ func TestStubOAuthProvider_Exchange(t *testing.T) {
 func TestStubOAuthManager_GetProvider(t *testing.T) {
 	mgr := NewStubOAuthManager(testLogger(), "google", "github")
 
-	// Known provider should succeed.
 	p, err := mgr.GetProvider("google")
 	if err != nil {
 		t.Fatalf("GetProvider(google) returned error: %v", err)
@@ -248,7 +237,6 @@ func TestStubOAuthManager_GetProvider(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", p.Name(), "google")
 	}
 
-	// Unknown provider should return an error.
 	_, err = mgr.GetProvider("facebook")
 	if err == nil {
 		t.Fatal("GetProvider(facebook) expected error, got nil")
@@ -265,19 +253,6 @@ func TestStubWebhookVerifier_AlwaysSucceeds(t *testing.T) {
 	}
 }
 
-// TestStubEmailVerifier_AlwaysValid verifies the stub email verifier always
-// returns true.
-func TestStubEmailVerifier_AlwaysValid(t *testing.T) {
-	stub := NewStubEmailVerifier(testLogger())
-	valid, err := stub.Verify([]byte("payload"), "signature", "timestamp", "pubkey")
-	if err != nil {
-		t.Errorf("Verify returned error: %v", err)
-	}
-	if !valid {
-		t.Error("Verify returned false, want true")
-	}
-}
-
 // TestNewClientRegistry_ProductionWithOrgBillingLookup verifies that the
 // WithOrgBillingLookup option is properly passed to the StripeClient.
 func TestNewClientRegistry_ProductionWithOrgBillingLookup(t *testing.T) {
@@ -287,18 +262,14 @@ func TestNewClientRegistry_ProductionWithOrgBillingLookup(t *testing.T) {
 		Billing: config.BillingConfig{
 			StripeSecretKey: types.SecretString("sk_test_fake"),
 		},
-		Email: config.EmailConfig{
-			SendGridAPIKey: types.SecretString("SG.fake_key"),
-		},
 		Server: config.ServerConfig{
 			APIExternalURL: "https://api.watchpoint.io",
 		},
 	}
 
-	// Create a mock OrgBillingLookup.
 	mockLookup := &registryMockOrgBillingLookup{}
 
-	reg, err := NewClientRegistry(cfg, testLogger(), WithOrgBillingLookup(mockLookup))
+	reg, err := NewClientRegistry(cfg, aws.Config{}, testLogger(), WithOrgBillingLookup(mockLookup))
 	if err != nil {
 		t.Fatalf("NewClientRegistry returned error: %v", err)
 	}
@@ -308,15 +279,12 @@ func TestNewClientRegistry_ProductionWithOrgBillingLookup(t *testing.T) {
 		t.Fatalf("Billing is %T, want *StripeClient", reg.Billing)
 	}
 
-	// Verify that the OrgBillingLookup was injected.
 	if stripeClient.orgLookup != mockLookup {
 		t.Error("StripeClient.orgLookup does not match the injected mock")
 	}
 }
 
-// registryMockOrgBillingLookup is a minimal test double for OrgBillingLookup,
-// used exclusively by registry tests. Named distinctly to avoid conflict with
-// the mock in stripe_test.go.
+// registryMockOrgBillingLookup is a minimal test double for OrgBillingLookup.
 type registryMockOrgBillingLookup struct{}
 
 func (m *registryMockOrgBillingLookup) GetBillingInfo(ctx context.Context, orgID string) (string, string, error) {

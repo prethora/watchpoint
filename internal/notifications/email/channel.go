@@ -11,8 +11,8 @@ import (
 )
 
 // EmailChannel implements the types.NotificationChannel interface for email
-// delivery. It resolves templates, prepares data with timezone localization,
-// and delivers via an external EmailProvider (e.g., SendGrid).
+// delivery. It renders templates client-side and delivers via an external
+// EmailProvider (AWS SES).
 //
 // Architecture reference: 08b-email-worker.md Section 2, 5
 type EmailChannel struct {
@@ -80,10 +80,9 @@ func (e *EmailChannel) Format(ctx context.Context, n *types.Notification, config
 //  1. Redact destination for logging
 //  2. Parse Notification from payload
 //  3. Test Mode bypass
-//  4. Resolve template with soft-fail fallback (VERT-003)
-//  5. Prepare template data with timezone formatting
-//  6. Send via provider
-//  7. Handle synchronous failures (blocklist -> terminal, others -> retry)
+//  4. Render template with soft-fail fallback (VERT-003)
+//  5. Send pre-rendered email via provider
+//  6. Handle synchronous failures (blocklist -> terminal, others -> retry)
 func (e *EmailChannel) Deliver(ctx context.Context, payload []byte, destination string) (*types.DeliveryResult, error) {
 	// 1. Redact destination for logging.
 	e.logger.Info("attempting email delivery", "dest", RedactEmail(destination))
@@ -103,11 +102,10 @@ func (e *EmailChannel) Deliver(ctx context.Context, payload []byte, destination 
 		}, nil
 	}
 
-	// 4. Resolve template with soft-fail fallback (VERT-003/VERT-004).
-	tmplID, err := e.templates.Resolve(n.TemplateSet, n.EventType)
+	// 4. Render template with soft-fail fallback (VERT-003/VERT-004).
+	rendered, sender, err := e.templates.Render(n.TemplateSet, n.EventType, &n)
 	if err != nil {
-		// Both requested set and default fallback failed - permanent failure.
-		e.logger.Error("template resolution failed for all sets",
+		e.logger.Error("template rendering failed",
 			"requested_set", n.TemplateSet,
 			"event_type", string(n.EventType),
 			"error", err.Error(),
@@ -115,19 +113,14 @@ func (e *EmailChannel) Deliver(ctx context.Context, payload []byte, destination 
 		return nil, err
 	}
 
-	// 5. Prepare template data and sender identity.
-	data, sender, err := e.templates.Prepare(&n)
-	if err != nil {
-		return nil, fmt.Errorf("email channel: template prepare failed: %w", err)
-	}
-
-	// 6. Send via provider.
+	// 5. Send pre-rendered email via provider.
 	msgID, err := e.provider.Send(ctx, types.SendInput{
-		To:           destination,
-		From:         sender,
-		TemplateID:   tmplID,
-		TemplateData: data,
-		ReferenceID:  n.ID,
+		To:          destination,
+		From:        sender,
+		Subject:     rendered.Subject,
+		BodyHTML:    rendered.BodyHTML,
+		BodyText:    rendered.BodyText,
+		ReferenceID: n.ID,
 	})
 
 	// 7. Handle synchronous failures.

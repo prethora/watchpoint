@@ -105,10 +105,10 @@ func TestBuildInventory_ReturnsCorrectCount(t *testing.T) {
 	v := NewValidatorWithDeps(nil, nil)
 	inventory := BuildInventory(v)
 
-	// DB URL, Stripe Secret, Stripe Pub, SendGrid, RunPod Key,
+	// DB URL, Stripe Secret, Stripe Pub, RunPod Key,
 	// Google Client ID, Google Secret, GitHub Client ID, GitHub Secret,
 	// Session Key (generated), Admin API Key (generated), RunPod Endpoint ID (fixed)
-	expectedCount := 12
+	expectedCount := 11
 	if len(inventory) != expectedCount {
 		t.Errorf("inventory count = %d, want %d", len(inventory), expectedCount)
 		for i, step := range inventory {
@@ -125,7 +125,6 @@ func TestBuildInventory_SSMPaths(t *testing.T) {
 		"database/url":                   true,
 		"billing/stripe_secret_key":      true,
 		"billing/stripe_publishable_key": true,
-		"email/sendgrid_api_key":         true,
 		"forecast/runpod_api_key":        true,
 		"auth/google_client_id":          true,
 		"auth/google_secret":             true,
@@ -156,7 +155,6 @@ func TestBuildInventory_ParameterTypes(t *testing.T) {
 		"database/url":                   ParamSecureString,
 		"billing/stripe_secret_key":      ParamSecureString,
 		"billing/stripe_publishable_key": ParamString,
-		"email/sendgrid_api_key":         ParamSecureString,
 		"forecast/runpod_api_key":        ParamSecureString,
 		"auth/google_client_id":          ParamString,
 		"auth/google_secret":             ParamSecureString,
@@ -186,7 +184,6 @@ func TestBuildInventory_SourceTypes(t *testing.T) {
 		"database/url":                   SourcePrompt,
 		"billing/stripe_secret_key":      SourcePrompt,
 		"billing/stripe_publishable_key": SourcePrompt,
-		"email/sendgrid_api_key":         SourcePrompt,
 		"forecast/runpod_api_key":        SourcePrompt,
 		"auth/google_client_id":          SourcePrompt,
 		"auth/google_secret":             SourcePrompt,
@@ -1072,9 +1069,9 @@ func TestRun_AllNewParameters(t *testing.T) {
 		t.Fatalf("unexpected error: %v\nstderr: %s", err, stderr.String())
 	}
 
-	// Verify all 12 parameters were written.
-	if len(mock.putCalls) != 12 {
-		t.Errorf("put calls = %d, want 12", len(mock.putCalls))
+	// Verify all 11 parameters were written.
+	if len(mock.putCalls) != 11 {
+		t.Errorf("put calls = %d, want 11", len(mock.putCalls))
 		for i, call := range mock.putCalls {
 			t.Logf("  [%d] %s", i, aws.ToString(call.Name))
 		}
@@ -1090,7 +1087,6 @@ func TestRun_AllNewParameters(t *testing.T) {
 		"/dev/watchpoint/database/url",
 		"/dev/watchpoint/billing/stripe_secret_key",
 		"/dev/watchpoint/billing/stripe_publishable_key",
-		"/dev/watchpoint/email/sendgrid_api_key",
 		"/dev/watchpoint/forecast/runpod_api_key",
 		"/dev/watchpoint/auth/google_client_id",
 		"/dev/watchpoint/auth/google_secret",
@@ -1113,7 +1109,6 @@ func TestRun_AllParametersExist_AllSkipped(t *testing.T) {
 		"/dev/watchpoint/database/url":                   true,
 		"/dev/watchpoint/billing/stripe_secret_key":      true,
 		"/dev/watchpoint/billing/stripe_publishable_key": true,
-		"/dev/watchpoint/email/sendgrid_api_key":         true,
 		"/dev/watchpoint/forecast/runpod_api_key":        true,
 		"/dev/watchpoint/auth/google_client_id":          true,
 		"/dev/watchpoint/auth/google_secret":             true,
@@ -1128,8 +1123,8 @@ func TestRun_AllParametersExist_AllSkipped(t *testing.T) {
 		getParameterFn: mockGetParameterExisting(existing),
 	}
 
-	// All 12 steps will ask skip/overwrite -- provide "s" for all.
-	skipInputs := strings.Repeat("s\n", 12)
+	// All 11 steps will ask skip/overwrite -- provide "s" for all.
+	skipInputs := strings.Repeat("s\n", 11)
 
 	runner, stderr := newTestRunnerWithSimpleValidation(mock)
 	runner.Stdin = strings.NewReader(skipInputs)
@@ -1161,7 +1156,7 @@ func TestRun_SummaryContainsAllParameters(t *testing.T) {
 	if !strings.Contains(output, "Bootstrap Summary") {
 		t.Error("output missing Bootstrap Summary header")
 	}
-	if !strings.Contains(output, "Total: 12 parameters") {
+	if !strings.Contains(output, "Total: 11 parameters") {
 		t.Errorf("output missing total count, got:\n%s", output)
 	}
 }
@@ -1244,7 +1239,7 @@ func TestRun_MixedSkipAndWrite(t *testing.T) {
 
 	// Build stdin: skip for existing, values for new.
 	// Order: DB URL (exists->skip), Stripe Secret (exists->skip), Stripe Pub (new->value),
-	// SendGrid (new->value), RunPod Key (new->value), Google ID (new->value),
+	// RunPod Key (new->value), Google ID (new->value),
 	// Google Secret (new->value), GitHub ID (new->value), GitHub Secret (new->value),
 	// Session Key (exists->skip), Admin API Key (new->generated), RunPod Endpoint (new->fixed)
 	var inputLines []string
@@ -1269,14 +1264,14 @@ func TestRun_MixedSkipAndWrite(t *testing.T) {
 		t.Fatalf("unexpected error: %v\nstderr: %s", err, stderr.String())
 	}
 
-	// 3 skipped, 9 written/generated.
+	// 3 skipped, 8 written/generated.
 	// Actually: 3 skipped (DB, Stripe Secret, Session Key)
-	// 7 prompted (Stripe Pub, SendGrid, RunPod Key, Google ID, Google Secret, GitHub ID, GitHub Secret)
+	// 6 prompted (Stripe Pub, RunPod Key, Google ID, Google Secret, GitHub ID, GitHub Secret)
 	// 1 generated (Admin API Key)
 	// 1 fixed (RunPod Endpoint ID)
-	// Total: 9 put calls
-	if len(mock.putCalls) != 9 {
-		t.Errorf("put calls = %d, want 9", len(mock.putCalls))
+	// Total: 8 put calls
+	if len(mock.putCalls) != 8 {
+		t.Errorf("put calls = %d, want 8", len(mock.putCalls))
 		for i, call := range mock.putCalls {
 			t.Logf("  [%d] %s", i, aws.ToString(call.Name))
 		}

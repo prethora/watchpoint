@@ -49,7 +49,7 @@ var subjectPrefixes = map[types.EventType]string{
 // Renderer performs client-side email template rendering using Go's
 // html/template with embedded template files. It implements TemplateService.
 //
-// Architecture: replaces the server-side SendGrid Dynamic Templates approach.
+// Architecture: uses client-side Go template rendering with embedded templates.
 // Keeps soft-fail fallback logic (VERT-003/VERT-004): if the requested
 // template set is not found, falls back to "default" before erroring.
 type Renderer struct {

@@ -134,7 +134,7 @@ func TestBounceProcessor_Process_HardBounce_BelowThreshold(t *testing.T) {
 		HealthRepo:     healthRepo,
 		UserLookup:     &mockUserEmailLookup{email: "owner@test.com"},
 		EmailProvider:  &mockEmailProvider{sendMsgID: "alert-1"},
-		Templates:      &mockTemplateService{resolveID: "d-system-alert"},
+		Templates:      &mockTemplateService{},
 		Logger:         logger,
 	})
 
@@ -192,7 +192,7 @@ func TestBounceProcessor_Process_SpamComplaint_ImmediateDisable(t *testing.T) {
 		HealthRepo:     healthRepo,
 		UserLookup:     &mockUserEmailLookup{email: "owner@org2.com"},
 		EmailProvider:  provider,
-		Templates:      &mockTemplateService{resolveID: "d-system-alert"},
+		Templates:      &mockTemplateService{},
 		Logger:         newTestLogger(),
 	})
 
@@ -385,7 +385,7 @@ func TestBounceProcessor_Process_OwnerNotificationFailure_NonFatal(t *testing.T)
 		// UserLookup fails - owner email cannot be found.
 		UserLookup:    &mockUserEmailLookup{err: errors.New("no owner found")},
 		EmailProvider: &mockEmailProvider{},
-		Templates:     &mockTemplateService{resolveID: "d-system"},
+		Templates:     &mockTemplateService{},
 		Logger:        logger,
 	})
 
@@ -433,7 +433,7 @@ func TestBounceProcessor_Process_OwnerNotification_TemplateResolutionFailure(t *
 		HealthRepo:     healthRepo,
 		UserLookup:     &mockUserEmailLookup{email: "owner@org7.com"},
 		EmailProvider:  &mockEmailProvider{sendMsgID: "alert-msg"},
-		Templates:      &mockTemplateService{resolveErr: errors.New("template not found")},
+		Templates:      &mockTemplateService{renderErr: errors.New("template not found")},
 		Logger:         logger,
 	})
 
@@ -472,8 +472,8 @@ func TestBounceProcessor_Process_OwnerNotification_SendFailure(t *testing.T) {
 		DeliveryLookup: deliveryLookup,
 		HealthRepo:     healthRepo,
 		UserLookup:     &mockUserEmailLookup{email: "owner@org8.com"},
-		EmailProvider:  &mockEmailProvider{sendErr: errors.New("send grid down")},
-		Templates:      &mockTemplateService{resolveID: "d-system"},
+		EmailProvider:  &mockEmailProvider{sendErr: errors.New("email provider down")},
+		Templates:      &mockTemplateService{},
 		Logger:         logger,
 	})
 
@@ -527,7 +527,7 @@ func TestBounceProcessor_Integration_ThreeBouncesDisablesChannel(t *testing.T) {
 		HealthRepo:    healthRepo,
 		UserLookup:    &mockUserEmailLookup{email: "owner@integration.com"},
 		EmailProvider: provider,
-		Templates:     &mockTemplateService{resolveID: "d-system-alert-template"},
+		Templates:     &mockTemplateService{},
 		Logger:        logger,
 	})
 
@@ -622,18 +622,14 @@ func TestBounceProcessor_Integration_ThreeBouncesDisablesChannel(t *testing.T) {
 	if provider.sendInput.To != "owner@integration.com" {
 		t.Errorf("notification To = %q, want owner@integration.com", provider.sendInput.To)
 	}
-	if provider.sendInput.TemplateID != "d-system-alert-template" {
-		t.Errorf("notification TemplateID = %q, want d-system-alert-template", provider.sendInput.TemplateID)
+	// Verify the rendered email has a subject.
+	if provider.sendInput.Subject == "" {
+		t.Error("notification Subject should not be empty")
 	}
 
-	// Verify template data includes the bounced address.
-	if addr, ok := provider.sendInput.TemplateData["bounced_address"].(string); !ok || addr != "bad@example.com" {
-		t.Errorf("notification template data bounced_address = %v, want bad@example.com", provider.sendInput.TemplateData["bounced_address"])
-	}
-
-	// Verify template data includes the organization ID.
-	if oid, ok := provider.sendInput.TemplateData["organization_id"].(string); !ok || oid != orgID {
-		t.Errorf("notification template data organization_id = %v, want %s", provider.sendInput.TemplateData["organization_id"], orgID)
+	// Verify the rendered email has HTML body content.
+	if provider.sendInput.BodyHTML == "" {
+		t.Error("notification BodyHTML should not be empty")
 	}
 }
 
@@ -657,7 +653,7 @@ func TestBounceProcessor_Integration_MixedBounceAndComplaint(t *testing.T) {
 		HealthRepo:    healthRepo,
 		UserLookup:    &mockUserEmailLookup{email: "owner@mixed.com"},
 		EmailProvider: provider,
-		Templates:     &mockTemplateService{resolveID: "d-system"},
+		Templates:     &mockTemplateService{},
 		Logger:        newTestLogger(),
 	})
 
@@ -755,7 +751,12 @@ func TestBounceProcessor_Process_OwnerNotificationDetails(t *testing.T) {
 		HealthRepo:    newMockChannelHealthRepo(),
 		UserLookup:    &mockUserEmailLookup{email: "admin@company.com"},
 		EmailProvider: provider,
-		Templates:     &mockTemplateService{resolveID: "d-sys-alert-v2"},
+		Templates:     &mockTemplateService{
+			sender: types.SenderIdentity{
+				Name:    "WatchPoint System",
+				Address: "system@watchpoint.io",
+			},
+		},
 		Logger:        newTestLogger(),
 	})
 
@@ -773,7 +774,7 @@ func TestBounceProcessor_Process_OwnerNotificationDetails(t *testing.T) {
 		t.Fatal("expected Send to be called for owner notification")
 	}
 
-	// Verify sender identity.
+	// Verify sender identity (set by mockTemplateService).
 	if provider.sendInput.From.Name != "WatchPoint System" {
 		t.Errorf("From.Name = %q, want WatchPoint System", provider.sendInput.From.Name)
 	}
@@ -781,15 +782,11 @@ func TestBounceProcessor_Process_OwnerNotificationDetails(t *testing.T) {
 		t.Errorf("From.Address = %q, want system@watchpoint.io", provider.sendInput.From.Address)
 	}
 
-	// Verify template data.
-	data := provider.sendInput.TemplateData
-	if data["bounced_address"] != "bounced@company.com" {
-		t.Errorf("bounced_address = %v, want bounced@company.com", data["bounced_address"])
+	// Verify rendered email content.
+	if provider.sendInput.Subject == "" {
+		t.Error("Subject should not be empty")
 	}
-	if data["organization_id"] != "org-detail" {
-		t.Errorf("organization_id = %v, want org-detail", data["organization_id"])
-	}
-	if data["event_type"] != string(types.EventSystemAlert) {
-		t.Errorf("event_type = %v, want %s", data["event_type"], types.EventSystemAlert)
+	if provider.sendInput.BodyHTML == "" {
+		t.Error("BodyHTML should not be empty")
 	}
 }

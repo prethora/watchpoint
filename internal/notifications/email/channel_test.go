@@ -29,26 +29,24 @@ func (m *mockEmailProvider) Send(ctx context.Context, input types.SendInput) (st
 
 // mockTemplateService implements TemplateService for testing.
 type mockTemplateService struct {
-	resolveID  string
-	resolveErr error
-
-	prepareData   TemplateData
-	prepareSender types.SenderIdentity
-	prepareErr    error
+	rendered  *RenderedEmail
+	sender    types.SenderIdentity
+	renderErr error
 }
 
-func (m *mockTemplateService) Resolve(set string, eventType types.EventType) (string, error) {
-	if m.resolveErr != nil {
-		return "", m.resolveErr
+func (m *mockTemplateService) Render(set string, eventType types.EventType, n *types.Notification) (*RenderedEmail, types.SenderIdentity, error) {
+	if m.renderErr != nil {
+		return nil, types.SenderIdentity{}, m.renderErr
 	}
-	return m.resolveID, nil
-}
-
-func (m *mockTemplateService) Prepare(n *types.Notification) (TemplateData, types.SenderIdentity, error) {
-	if m.prepareErr != nil {
-		return nil, types.SenderIdentity{}, m.prepareErr
+	rendered := m.rendered
+	if rendered == nil {
+		rendered = &RenderedEmail{
+			Subject:  "Test Subject",
+			BodyHTML: "<p>Test</p>",
+			BodyText: "Test",
+		}
 	}
-	return m.prepareData, m.prepareSender, nil
+	return rendered, m.sender, nil
 }
 
 // --- EmailChannel.Type Tests ---
@@ -160,12 +158,12 @@ func TestEmailChannelFormat(t *testing.T) {
 func TestEmailChannelDeliver_Success(t *testing.T) {
 	provider := &mockEmailProvider{sendMsgID: "msg-provider-123"}
 	tmplService := &mockTemplateService{
-		resolveID: "d-template-abc",
-		prepareData: TemplateData{
-			"temperature": 35.0,
-			"location":    "NYC",
+		rendered: &RenderedEmail{
+			Subject:  "Threshold Crossed: Downtown Sensor",
+			BodyHTML: "<h1>Alert</h1><p>Temperature is 35.0</p>",
+			BodyText: "Alert: Temperature is 35.0",
 		},
-		prepareSender: types.SenderIdentity{
+		sender: types.SenderIdentity{
 			Name:    "WatchPoint Alerts",
 			Address: "alerts@watchpoint.io",
 		},
@@ -204,8 +202,11 @@ func TestEmailChannelDeliver_Success(t *testing.T) {
 	if provider.sendInput.To != "user@example.com" {
 		t.Errorf("provider To = %q, want user@example.com", provider.sendInput.To)
 	}
-	if provider.sendInput.TemplateID != "d-template-abc" {
-		t.Errorf("provider TemplateID = %q, want d-template-abc", provider.sendInput.TemplateID)
+	if provider.sendInput.Subject != "Threshold Crossed: Downtown Sensor" {
+		t.Errorf("provider Subject = %q, want Threshold Crossed: Downtown Sensor", provider.sendInput.Subject)
+	}
+	if provider.sendInput.BodyHTML != "<h1>Alert</h1><p>Temperature is 35.0</p>" {
+		t.Errorf("provider BodyHTML = %q", provider.sendInput.BodyHTML)
 	}
 	if provider.sendInput.ReferenceID != "notif-success" {
 		t.Errorf("provider ReferenceID = %q, want notif-success", provider.sendInput.ReferenceID)
@@ -255,9 +256,7 @@ func TestEmailChannelDeliver_BlocklistError_Sentinel(t *testing.T) {
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider: provider,
 		Templates: &mockTemplateService{
-			resolveID: "d-template",
-			prepareData: TemplateData{},
-			prepareSender: types.SenderIdentity{
+			sender: types.SenderIdentity{
 				Name:    "Test",
 				Address: "test@test.com",
 			},
@@ -292,16 +291,14 @@ func TestEmailChannelDeliver_BlocklistError_AppError(t *testing.T) {
 	provider := &mockEmailProvider{
 		sendErr: types.NewAppError(
 			types.ErrCodeEmailBlocked,
-			"SendGrid blocked",
+			"provider blocked",
 			nil,
 		),
 	}
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider: provider,
 		Templates: &mockTemplateService{
-			resolveID: "d-template",
-			prepareData: TemplateData{},
-			prepareSender: types.SenderIdentity{
+			sender: types.SenderIdentity{
 				Name:    "Test",
 				Address: "test@test.com",
 			},
@@ -333,16 +330,14 @@ func TestEmailChannelDeliver_TransientError(t *testing.T) {
 	provider := &mockEmailProvider{
 		sendErr: types.NewAppError(
 			types.ErrCodeUpstreamUnavailable,
-			"SendGrid 500",
+			"provider 500",
 			nil,
 		),
 	}
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider: provider,
 		Templates: &mockTemplateService{
-			resolveID: "d-template",
-			prepareData: TemplateData{},
-			prepareSender: types.SenderIdentity{
+			sender: types.SenderIdentity{
 				Name:    "Test",
 				Address: "test@test.com",
 			},
@@ -379,11 +374,11 @@ func TestEmailChannelDeliver_InvalidPayload(t *testing.T) {
 	}
 }
 
-func TestEmailChannelDeliver_TemplateResolutionFailure(t *testing.T) {
+func TestEmailChannelDeliver_TemplateRenderFailure(t *testing.T) {
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider: &mockEmailProvider{},
 		Templates: &mockTemplateService{
-			resolveErr: errors.New("template not found"),
+			renderErr: errors.New("template not found"),
 		},
 		Logger: newTestLogger(),
 	})
@@ -398,29 +393,6 @@ func TestEmailChannelDeliver_TemplateResolutionFailure(t *testing.T) {
 	_, err := ch.Deliver(context.Background(), payload, "user@example.com")
 	if err == nil {
 		t.Error("expected error for template resolution failure")
-	}
-}
-
-func TestEmailChannelDeliver_PrepareFailure(t *testing.T) {
-	ch := NewEmailChannel(EmailChannelConfig{
-		Provider: &mockEmailProvider{},
-		Templates: &mockTemplateService{
-			resolveID:  "d-template",
-			prepareErr: errors.New("prepare failed"),
-		},
-		Logger: newTestLogger(),
-	})
-
-	n := &types.Notification{
-		ID:          "notif-prep-fail",
-		EventType:   types.EventThresholdCrossed,
-		TemplateSet: "default",
-	}
-	payload, _ := json.Marshal(n)
-
-	_, err := ch.Deliver(context.Background(), payload, "user@example.com")
-	if err == nil {
-		t.Error("expected error for prepare failure")
 	}
 }
 
@@ -486,35 +458,23 @@ func TestEmailChannelShouldRetry(t *testing.T) {
 // the correct inputs.
 
 func TestEmailChannelIntegration_FullDeliveryFlow(t *testing.T) {
-	// Setup: Real TemplateEngine + Mock Provider.
+	// Setup: Real Renderer + Mock Provider.
 	logger := newTestLogger()
 
-	engine, err := NewTemplateEngine(TemplateEngineConfig{
-		TemplatesJSON: `{
-			"sets": {
-				"default": {
-					"threshold_crossed": "d-default-crossed",
-					"threshold_cleared": "d-default-cleared",
-					"system_alert": "d-default-system"
-				},
-				"wedding": {
-					"threshold_crossed": "d-wedding-crossed"
-				}
-			}
-		}`,
+	renderer, err := NewRenderer(RendererConfig{
 		DefaultFromAddr: "alerts@watchpoint.io",
 		DefaultFromName: "WatchPoint Alerts",
 		Logger:          logger,
 	})
 	if err != nil {
-		t.Fatalf("failed to create template engine: %v", err)
+		t.Fatalf("failed to create renderer: %v", err)
 	}
 
 	provider := &mockEmailProvider{sendMsgID: "msg-integration-001"}
 
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider:  provider,
-		Templates: engine,
+		Templates: renderer,
 		Logger:    logger,
 	})
 
@@ -527,12 +487,11 @@ func TestEmailChannelIntegration_FullDeliveryFlow(t *testing.T) {
 		Urgency:        types.UrgencyWarning,
 		TemplateSet:    "default",
 		Payload: map[string]interface{}{
-			"timezone":                   "America/New_York",
-			"temperature":                38.2,
-			"precipitation_probability":  0.75,
-			"location":                   "Central Park, NY",
-			"forecast_time":              "2026-02-06T18:00:00Z",
-			"threshold_crossed_at":       "2026-02-06T15:30:00Z",
+			"timezone":                  "America/New_York",
+			"temperature":               38.2,
+			"precipitation_probability": 0.75,
+			"location":                  "Central Park, NY",
+			"watchpoint_name":           "Downtown Sensor",
 		},
 		CreatedAt: time.Date(2026, 2, 6, 15, 0, 0, 0, time.UTC),
 	}
@@ -566,8 +525,14 @@ func TestEmailChannelIntegration_FullDeliveryFlow(t *testing.T) {
 	if input.To != destination {
 		t.Errorf("input.To = %q, want %q", input.To, destination)
 	}
-	if input.TemplateID != "d-default-crossed" {
-		t.Errorf("input.TemplateID = %q, want d-default-crossed", input.TemplateID)
+	if input.Subject == "" {
+		t.Error("input.Subject should not be empty")
+	}
+	if input.BodyHTML == "" {
+		t.Error("input.BodyHTML should not be empty")
+	}
+	if input.BodyText == "" {
+		t.Error("input.BodyText should not be empty")
 	}
 	if input.ReferenceID != "notif-integration-1" {
 		t.Errorf("input.ReferenceID = %q, want notif-integration-1", input.ReferenceID)
@@ -578,74 +543,32 @@ func TestEmailChannelIntegration_FullDeliveryFlow(t *testing.T) {
 	if input.From.Name != "WatchPoint Alerts" {
 		t.Errorf("input.From.Name = %q, want WatchPoint Alerts", input.From.Name)
 	}
-
-	// Verify template data includes expected fields.
-	if _, ok := input.TemplateData["temperature"]; !ok {
-		t.Error("template data missing 'temperature'")
-	}
-	if _, ok := input.TemplateData["notification_id"]; !ok {
-		t.Error("template data missing 'notification_id'")
-	}
-	if _, ok := input.TemplateData["formatted_date"]; !ok {
-		t.Error("template data missing 'formatted_date'")
-	}
-	if _, ok := input.TemplateData["timezone_name"]; !ok {
-		t.Error("template data missing 'timezone_name'")
-	}
-
-	// Verify probability was formatted.
-	if ppf, ok := input.TemplateData["precipitation_probability_formatted"].(string); !ok || ppf != "75%" {
-		t.Errorf("precipitation_probability_formatted = %v, want 75%%", input.TemplateData["precipitation_probability_formatted"])
-	}
-
-	// Verify timestamps were formatted.
-	if _, ok := input.TemplateData["forecast_time_formatted"].(string); !ok {
-		t.Error("template data missing 'forecast_time_formatted'")
-	}
-	if _, ok := input.TemplateData["threshold_crossed_at_formatted"].(string); !ok {
-		t.Error("template data missing 'threshold_crossed_at_formatted'")
-	}
 }
 
-func TestEmailChannelIntegration_FallbackTemplate(t *testing.T) {
-	// Test that a custom template set falls back to default when
-	// the specific event type isn't configured in the custom set.
+func TestEmailChannelIntegration_CustomSetSenderName(t *testing.T) {
+	// Test that a custom template set appends the set name to the sender.
 	logger := newTestLogger()
 
-	engine, err := NewTemplateEngine(TemplateEngineConfig{
-		TemplatesJSON: `{
-			"sets": {
-				"default": {
-					"threshold_crossed": "d-default-crossed",
-					"threshold_cleared": "d-default-cleared",
-					"system_alert": "d-default-system"
-				},
-				"wedding": {
-					"threshold_crossed": "d-wedding-crossed"
-				}
-			}
-		}`,
+	renderer, err := NewRenderer(RendererConfig{
 		DefaultFromAddr: "alerts@watchpoint.io",
 		DefaultFromName: "WatchPoint Alerts",
 		Logger:          logger,
 	})
 	if err != nil {
-		t.Fatalf("failed to create template engine: %v", err)
+		t.Fatalf("failed to create renderer: %v", err)
 	}
 
-	provider := &mockEmailProvider{sendMsgID: "msg-fallback-001"}
+	provider := &mockEmailProvider{sendMsgID: "msg-custom-001"}
 
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider:  provider,
-		Templates: engine,
+		Templates: renderer,
 		Logger:    logger,
 	})
 
-	// Notification uses "wedding" set but event type is threshold_cleared,
-	// which only exists in the default set.
 	notification := &types.Notification{
-		ID:          "notif-fallback",
-		EventType:   types.EventThresholdCleared,
+		ID:          "notif-custom",
+		EventType:   types.EventThresholdCrossed,
 		TemplateSet: "wedding",
 		Payload:     map[string]interface{}{},
 	}
@@ -664,19 +587,9 @@ func TestEmailChannelIntegration_FallbackTemplate(t *testing.T) {
 		t.Errorf("Status = %v, want %v", result.Status, types.DeliveryStatusSent)
 	}
 
-	// Should have used the default template.
-	if provider.sendInput.TemplateID != "d-default-cleared" {
-		t.Errorf("TemplateID = %q, want d-default-cleared", provider.sendInput.TemplateID)
-	}
-
 	// Sender should include the wedding set name.
 	if provider.sendInput.From.Name != "WatchPoint Alerts (wedding)" {
 		t.Errorf("From.Name = %q, want WatchPoint Alerts (wedding)", provider.sendInput.From.Name)
-	}
-
-	// Verify warning was logged for fallback.
-	if len(logger.warns) == 0 {
-		t.Error("expected fallback warning log")
 	}
 }
 
@@ -684,27 +597,18 @@ func TestEmailChannelIntegration_TestModeBypass(t *testing.T) {
 	// Verify that test mode notifications never reach the provider.
 	provider := &mockEmailProvider{sendMsgID: "should-not-use"}
 
-	engine, err := NewTemplateEngine(TemplateEngineConfig{
-		TemplatesJSON: `{
-			"sets": {
-				"default": {
-					"threshold_crossed": "d-crossed",
-					"threshold_cleared": "d-cleared",
-					"system_alert": "d-system"
-				}
-			}
-		}`,
+	renderer, err := NewRenderer(RendererConfig{
 		DefaultFromAddr: "alerts@watchpoint.io",
 		DefaultFromName: "WatchPoint Alerts",
 		Logger:          newTestLogger(),
 	})
 	if err != nil {
-		t.Fatalf("failed to create template engine: %v", err)
+		t.Fatalf("failed to create renderer: %v", err)
 	}
 
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider:  provider,
-		Templates: engine,
+		Templates: renderer,
 		Logger:    newTestLogger(),
 	})
 
@@ -733,36 +637,27 @@ func TestEmailChannelIntegration_TestModeBypass(t *testing.T) {
 }
 
 func TestEmailChannelIntegration_BlockedRecipient(t *testing.T) {
-	// Simulate a SendGrid 403 Forbidden via AppError.
+	// Simulate a provider blocked delivery via AppError.
 	provider := &mockEmailProvider{
 		sendErr: types.NewAppError(
 			types.ErrCodeEmailBlocked,
-			"SendGrid blocked delivery",
+			"provider blocked delivery",
 			nil,
 		),
 	}
 
-	engine, err := NewTemplateEngine(TemplateEngineConfig{
-		TemplatesJSON: `{
-			"sets": {
-				"default": {
-					"threshold_crossed": "d-crossed",
-					"threshold_cleared": "d-cleared",
-					"system_alert": "d-system"
-				}
-			}
-		}`,
+	renderer, err := NewRenderer(RendererConfig{
 		DefaultFromAddr: "alerts@watchpoint.io",
 		DefaultFromName: "WatchPoint Alerts",
 		Logger:          newTestLogger(),
 	})
 	if err != nil {
-		t.Fatalf("failed to create template engine: %v", err)
+		t.Fatalf("failed to create renderer: %v", err)
 	}
 
 	ch := NewEmailChannel(EmailChannelConfig{
 		Provider:  provider,
-		Templates: engine,
+		Templates: renderer,
 		Logger:    newTestLogger(),
 	})
 

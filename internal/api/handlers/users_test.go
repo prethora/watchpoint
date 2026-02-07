@@ -315,9 +315,9 @@ func TestUserHandler_Invite_EmailServiceFails_500(t *testing.T) {
 	h, _, _, emailSvc, _ := newTestUserHandler()
 	orgID := "org_test123"
 
-	// Per USER-004: Return 500 if SendGrid fails so admin knows the invite didn't go out.
+	// Per USER-004: Return 500 if email provider fails so admin knows the invite didn't go out.
 	emailSvc.sendInviteFn = func(_ context.Context, _, _ string, _ types.UserRole) error {
-		return types.NewAppError(types.ErrCodeUpstreamEmailProvider, "SendGrid failed", nil)
+		return types.NewAppError(types.ErrCodeUpstreamEmailProvider, "email provider failed", nil)
 	}
 
 	body := `{"email": "newuser@test.com", "role": "admin"}`

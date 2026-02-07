@@ -63,10 +63,6 @@ func setFullTestEnv(t *testing.T) {
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_test_456")
 	t.Setenv("STRIPE_PUBLISHABLE_KEY", "pk_test_789")
 
-	// Email
-	t.Setenv("SENDGRID_API_KEY", "SG.test-key-123")
-	t.Setenv("EMAIL_TEMPLATES_JSON", `{"default":{"threshold_crossed":"d-abc123"}}`)
-
 	// Forecast
 	t.Setenv("RUNPOD_API_KEY", "rp_test_key_456")
 	t.Setenv("RUNPOD_ENDPOINT_ID", "test-endpoint-id")
@@ -246,11 +242,9 @@ func TestLoadConfigSSMResolution(t *testing.T) {
 	t.Setenv("DATABASE_URL_SSM_PARAM", "/dev/watchpoint/database/url")
 	t.Setenv("STRIPE_SECRET_KEY_SSM_PARAM", "/dev/watchpoint/billing/stripe_secret_key")
 	t.Setenv("STRIPE_WEBHOOK_SECRET_SSM_PARAM", "/dev/watchpoint/billing/stripe_webhook_secret")
-	t.Setenv("SENDGRID_API_KEY_SSM_PARAM", "/dev/watchpoint/email/sendgrid_api_key")
 	t.Setenv("RUNPOD_API_KEY_SSM_PARAM", "/dev/watchpoint/forecast/runpod_api_key")
 	t.Setenv("SESSION_KEY_SSM_PARAM", "/dev/watchpoint/auth/session_key")
 	t.Setenv("ADMIN_API_KEY_SSM_PARAM", "/dev/watchpoint/security/admin_api_key")
-	t.Setenv("EMAIL_TEMPLATES_JSON_SSM_PARAM", "/dev/watchpoint/email/templates_json")
 
 	// Ensure target env vars (the ones SSM resolution will set) are NOT already
 	// present in the OS environment. This prevents pre-existing env vars (e.g.,
@@ -258,8 +252,8 @@ func TestLoadConfigSSMResolution(t *testing.T) {
 	// We save and restore any pre-existing values in cleanup.
 	resolvedVars := []string{
 		"DATABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
-		"SENDGRID_API_KEY", "RUNPOD_API_KEY", "SESSION_KEY",
-		"ADMIN_API_KEY", "EMAIL_TEMPLATES_JSON",
+		"RUNPOD_API_KEY", "SESSION_KEY",
+		"ADMIN_API_KEY",
 	}
 	savedVars := make(map[string]struct{ val string; ok bool })
 	for _, v := range resolvedVars {
@@ -283,11 +277,9 @@ func TestLoadConfigSSMResolution(t *testing.T) {
 			"/dev/watchpoint/database/url":                "postgres://user:pass@rds.amazonaws.com/devdb",
 			"/dev/watchpoint/billing/stripe_secret_key":   "sk_live_resolved",
 			"/dev/watchpoint/billing/stripe_webhook_secret": "whsec_live_resolved",
-			"/dev/watchpoint/email/sendgrid_api_key":      "SG.resolved-key",
 			"/dev/watchpoint/forecast/runpod_api_key":     "rp_resolved_key",
 			"/dev/watchpoint/auth/session_key":            "resolved-session-key-that-is-definitely-at-least-32-characters-long",
 			"/dev/watchpoint/security/admin_api_key":      "resolved-admin-key",
-			"/dev/watchpoint/email/templates_json":        `{"default":{"threshold_crossed":"d-resolved"}}`,
 		},
 	}
 
@@ -306,9 +298,6 @@ func TestLoadConfigSSMResolution(t *testing.T) {
 	if cfg.Billing.StripeWebhookSecret.Unmask() != "whsec_live_resolved" {
 		t.Errorf("Billing.StripeWebhookSecret = %q, want resolved SSM value", cfg.Billing.StripeWebhookSecret.Unmask())
 	}
-	if cfg.Email.SendGridAPIKey.Unmask() != "SG.resolved-key" {
-		t.Errorf("Email.SendGridAPIKey = %q, want resolved SSM value", cfg.Email.SendGridAPIKey.Unmask())
-	}
 	if cfg.Forecast.RunPodAPIKey.Unmask() != "rp_resolved_key" {
 		t.Errorf("Forecast.RunPodAPIKey = %q, want resolved SSM value", cfg.Forecast.RunPodAPIKey.Unmask())
 	}
@@ -318,18 +307,14 @@ func TestLoadConfigSSMResolution(t *testing.T) {
 	if cfg.Security.AdminAPIKey.Unmask() != "resolved-admin-key" {
 		t.Errorf("Security.AdminAPIKey = %q, want resolved SSM value", cfg.Security.AdminAPIKey.Unmask())
 	}
-	if cfg.Email.Templates != `{"default":{"threshold_crossed":"d-resolved"}}` {
-		t.Errorf("Email.Templates = %q, want resolved SSM value", cfg.Email.Templates)
-	}
-
 	// Verify provider was called exactly once (single batch call).
 	if provider.callCount != 1 {
 		t.Errorf("provider.callCount = %d, want 1 (single batch call)", provider.callCount)
 	}
 
 	// Verify the correct number of SSM keys were requested.
-	if len(provider.calledWith) != 8 {
-		t.Errorf("provider was called with %d keys, want 8 (all SSM params)", len(provider.calledWith))
+	if len(provider.calledWith) != 6 {
+		t.Errorf("provider was called with %d keys, want 6 (all SSM params)", len(provider.calledWith))
 	}
 }
 
@@ -482,8 +467,6 @@ SQS_DLQ=https://sqs.us-east-1.amazonaws.com/123/dlq
 STRIPE_SECRET_KEY=sk_test_dotenv
 STRIPE_WEBHOOK_SECRET=whsec_dotenv
 STRIPE_PUBLISHABLE_KEY=pk_test_dotenv
-SENDGRID_API_KEY=SG.dotenv
-EMAIL_TEMPLATES_JSON={"default":{"threshold_crossed":"d-dotenv"}}
 RUNPOD_API_KEY=rp_dotenv
 RUNPOD_ENDPOINT_ID=dotenv-endpoint
 SESSION_KEY=dotenv-session-key-that-is-at-least-32-characters-long
@@ -512,7 +495,7 @@ ADMIN_API_KEY=dotenv-admin-key
 		"FORECAST_BUCKET", "SQS_EVAL_URGENT", "SQS_EVAL_STANDARD",
 		"SQS_NOTIFICATIONS", "SQS_DLQ", "STRIPE_SECRET_KEY",
 		"STRIPE_WEBHOOK_SECRET", "STRIPE_PUBLISHABLE_KEY",
-		"SENDGRID_API_KEY", "EMAIL_TEMPLATES_JSON", "RUNPOD_API_KEY",
+		"RUNPOD_API_KEY",
 		"RUNPOD_ENDPOINT_ID", "SESSION_KEY", "ADMIN_API_KEY",
 	}
 	for _, v := range envVarsToClear {
@@ -555,8 +538,6 @@ SQS_DLQ=https://sqs.us-east-1.amazonaws.com/123/dlq
 STRIPE_SECRET_KEY=sk_dotenv
 STRIPE_WEBHOOK_SECRET=whsec_dotenv
 STRIPE_PUBLISHABLE_KEY=pk_dotenv
-SENDGRID_API_KEY=SG.dotenv
-EMAIL_TEMPLATES_JSON={"default":{"threshold_crossed":"d-dotenv"}}
 RUNPOD_API_KEY=rp_dotenv
 RUNPOD_ENDPOINT_ID=dotenv-endpoint
 SESSION_KEY=dotenv-session-key-that-is-at-least-32-characters-long
@@ -584,7 +565,7 @@ ADMIN_API_KEY=dotenv-admin-key
 		"FORECAST_BUCKET", "SQS_EVAL_URGENT", "SQS_EVAL_STANDARD",
 		"SQS_NOTIFICATIONS", "SQS_DLQ", "STRIPE_SECRET_KEY",
 		"STRIPE_WEBHOOK_SECRET", "STRIPE_PUBLISHABLE_KEY",
-		"SENDGRID_API_KEY", "EMAIL_TEMPLATES_JSON", "RUNPOD_API_KEY",
+		"RUNPOD_API_KEY",
 		"RUNPOD_ENDPOINT_ID", "SESSION_KEY", "ADMIN_API_KEY",
 	}
 	for _, v := range envVarsToClear {
@@ -932,8 +913,11 @@ func TestLoadConfigEmailDefaults(t *testing.T) {
 	if cfg.Email.FromName != "WatchPoint Alerts" {
 		t.Errorf("Email.FromName = %q, want %q", cfg.Email.FromName, "WatchPoint Alerts")
 	}
-	if cfg.Email.Provider != "sendgrid" {
-		t.Errorf("Email.Provider = %q, want %q", cfg.Email.Provider, "sendgrid")
+	if cfg.Email.SESRegion != "us-east-1" {
+		t.Errorf("Email.SESRegion = %q, want %q", cfg.Email.SESRegion, "us-east-1")
+	}
+	if cfg.Email.Provider != "ses" {
+		t.Errorf("Email.Provider = %q, want %q", cfg.Email.Provider, "ses")
 	}
 }
 
@@ -1043,8 +1027,6 @@ func TestLoadConfigWithDepsIsolated(t *testing.T) {
 		"STRIPE_SECRET_KEY":   "sk_test_deps",
 		"STRIPE_WEBHOOK_SECRET": "whsec_deps",
 		"STRIPE_PUBLISHABLE_KEY": "pk_test_deps",
-		"SENDGRID_API_KEY":    "SG.deps-key",
-		"EMAIL_TEMPLATES_JSON": `{"default":{"threshold_crossed":"d-deps"}}`,
 		"RUNPOD_API_KEY":      "rp_deps_key",
 		"RUNPOD_ENDPOINT_ID":  "deps-endpoint",
 		"SESSION_KEY":         "deps-session-key-that-is-at-least-32-characters-long-enough",
@@ -1118,11 +1100,9 @@ func TestLoadConfigWithDepsSSMResolution(t *testing.T) {
 		"DATABASE_URL_SSM_PARAM":              "/staging/db/url",
 		"STRIPE_SECRET_KEY_SSM_PARAM":         "/staging/billing/stripe_key",
 		"STRIPE_WEBHOOK_SECRET_SSM_PARAM":     "/staging/billing/webhook_secret",
-		"SENDGRID_API_KEY_SSM_PARAM":          "/staging/email/sendgrid",
 		"RUNPOD_API_KEY_SSM_PARAM":            "/staging/forecast/runpod",
 		"SESSION_KEY_SSM_PARAM":               "/staging/auth/session",
 		"ADMIN_API_KEY_SSM_PARAM":             "/staging/security/admin",
-		"EMAIL_TEMPLATES_JSON_SSM_PARAM":      "/staging/email/templates",
 	}
 
 	provider := &testSecretProvider{
@@ -1130,11 +1110,9 @@ func TestLoadConfigWithDepsSSMResolution(t *testing.T) {
 			"/staging/db/url":                "postgres://staging:pass@rds/stagingdb",
 			"/staging/billing/stripe_key":    "sk_staging_resolved",
 			"/staging/billing/webhook_secret": "whsec_staging_resolved",
-			"/staging/email/sendgrid":        "SG.staging-resolved",
 			"/staging/forecast/runpod":       "rp_staging_resolved",
 			"/staging/auth/session":          "staging-session-key-at-least-32-characters-for-validation-ok",
 			"/staging/security/admin":        "staging-admin-resolved",
-			"/staging/email/templates":       `{"default":{"threshold_crossed":"d-staging"}}`,
 		},
 	}
 
@@ -1147,8 +1125,8 @@ func TestLoadConfigWithDepsSSMResolution(t *testing.T) {
 	// will overwrite. This prevents leaking OS env state between tests.
 	resolvedVars := []string{
 		"DATABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
-		"SENDGRID_API_KEY", "RUNPOD_API_KEY", "SESSION_KEY",
-		"ADMIN_API_KEY", "EMAIL_TEMPLATES_JSON",
+		"RUNPOD_API_KEY", "SESSION_KEY",
+		"ADMIN_API_KEY",
 	}
 	savedDepsSSM := make(map[string]struct{ val string; ok bool })
 	for _, v := range resolvedVars {
@@ -1253,21 +1231,18 @@ func TestLoadConfigSSMResolutionAllSecrets(t *testing.T) {
 	t.Setenv("DATABASE_URL_SSM_PARAM", "/prod/watchpoint/database/url")
 	t.Setenv("STRIPE_SECRET_KEY_SSM_PARAM", "/prod/watchpoint/billing/stripe_secret_key")
 	t.Setenv("STRIPE_WEBHOOK_SECRET_SSM_PARAM", "/prod/watchpoint/billing/stripe_webhook_secret")
-	t.Setenv("SENDGRID_API_KEY_SSM_PARAM", "/prod/watchpoint/email/sendgrid_api_key")
 	t.Setenv("RUNPOD_API_KEY_SSM_PARAM", "/prod/watchpoint/forecast/runpod_api_key")
 	t.Setenv("SESSION_KEY_SSM_PARAM", "/prod/watchpoint/auth/session_key")
 	t.Setenv("ADMIN_API_KEY_SSM_PARAM", "/prod/watchpoint/security/admin_api_key")
 	t.Setenv("GOOGLE_CLIENT_SECRET_SSM_PARAM", "/prod/watchpoint/auth/google_secret")
 	t.Setenv("GITHUB_CLIENT_SECRET_SSM_PARAM", "/prod/watchpoint/auth/github_secret")
-	t.Setenv("EMAIL_TEMPLATES_JSON_SSM_PARAM", "/prod/watchpoint/email/templates_json")
 
 	// Ensure target env vars are NOT already present in the OS environment
 	// (e.g., from the shell profile). Save and restore pre-existing values.
 	resolvedVars := []string{
 		"DATABASE_URL", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
-		"SENDGRID_API_KEY", "RUNPOD_API_KEY", "SESSION_KEY",
+		"RUNPOD_API_KEY", "SESSION_KEY",
 		"ADMIN_API_KEY", "GOOGLE_CLIENT_SECRET", "GITHUB_CLIENT_SECRET",
-		"EMAIL_TEMPLATES_JSON",
 	}
 	savedAllSecrets := make(map[string]struct{ val string; ok bool })
 	for _, v := range resolvedVars {
@@ -1291,13 +1266,11 @@ func TestLoadConfigSSMResolutionAllSecrets(t *testing.T) {
 			"/prod/watchpoint/database/url":                "postgres://prod:secret@prod-rds/proddb",
 			"/prod/watchpoint/billing/stripe_secret_key":   "sk_live_prod_key",
 			"/prod/watchpoint/billing/stripe_webhook_secret": "whsec_live_prod_secret",
-			"/prod/watchpoint/email/sendgrid_api_key":      "SG.prod-sendgrid-key",
 			"/prod/watchpoint/forecast/runpod_api_key":     "rp_prod_api_key",
 			"/prod/watchpoint/auth/session_key":            "prod-session-key-that-is-definitely-at-least-32-characters-for-validation",
 			"/prod/watchpoint/security/admin_api_key":      "prod-admin-api-key-value",
 			"/prod/watchpoint/auth/google_secret":          "prod-google-client-secret",
 			"/prod/watchpoint/auth/github_secret":          "prod-github-client-secret",
-			"/prod/watchpoint/email/templates_json":        `{"default":{"threshold_crossed":"d-prod123","alert_resolved":"d-prod456"}}`,
 		},
 	}
 
@@ -1314,13 +1287,11 @@ func TestLoadConfigSSMResolutionAllSecrets(t *testing.T) {
 		"Database.URL":               {cfg.Database.URL.Unmask(), "postgres://prod:secret@prod-rds/proddb"},
 		"Billing.StripeSecretKey":    {cfg.Billing.StripeSecretKey.Unmask(), "sk_live_prod_key"},
 		"Billing.StripeWebhookSecret": {cfg.Billing.StripeWebhookSecret.Unmask(), "whsec_live_prod_secret"},
-		"Email.SendGridAPIKey":       {cfg.Email.SendGridAPIKey.Unmask(), "SG.prod-sendgrid-key"},
 		"Forecast.RunPodAPIKey":      {cfg.Forecast.RunPodAPIKey.Unmask(), "rp_prod_api_key"},
 		"Auth.SessionKey":            {cfg.Auth.SessionKey.Unmask(), "prod-session-key-that-is-definitely-at-least-32-characters-for-validation"},
 		"Security.AdminAPIKey":       {cfg.Security.AdminAPIKey.Unmask(), "prod-admin-api-key-value"},
 		"Auth.GoogleClientSecret":    {cfg.Auth.GoogleClientSecret.Unmask(), "prod-google-client-secret"},
 		"Auth.GithubClientSecret":    {cfg.Auth.GithubClientSecret.Unmask(), "prod-github-client-secret"},
-		"Email.Templates":            {cfg.Email.Templates, `{"default":{"threshold_crossed":"d-prod123","alert_resolved":"d-prod456"}}`},
 	}
 
 	for name, check := range secrets {
@@ -1333,9 +1304,9 @@ func TestLoadConfigSSMResolutionAllSecrets(t *testing.T) {
 	if provider.callCount != 1 {
 		t.Errorf("provider.callCount = %d, want 1", provider.callCount)
 	}
-	// All 10 SSM params should have been requested.
-	if len(provider.calledWith) != 10 {
-		t.Errorf("provider called with %d keys, want 10", len(provider.calledWith))
+	// All 8 SSM params should have been requested.
+	if len(provider.calledWith) != 8 {
+		t.Errorf("provider called with %d keys, want 8", len(provider.calledWith))
 	}
 }
 
@@ -1398,22 +1369,3 @@ func TestLoadConfigInvalidURL(t *testing.T) {
 	}
 }
 
-// TestLoadConfigInvalidJSON verifies that invalid JSON in a json-validated
-// field fails validation.
-func TestLoadConfigInvalidJSON(t *testing.T) {
-	setFullTestEnv(t)
-	t.Setenv("EMAIL_TEMPLATES_JSON", "not-valid-json{")
-
-	_, err := LoadConfig(nil)
-	if err == nil {
-		t.Fatal("expected error for invalid JSON in EMAIL_TEMPLATES_JSON, got nil")
-	}
-
-	var cfgErr *ConfigError
-	if !errors.As(err, &cfgErr) {
-		t.Fatalf("expected *ConfigError, got %T: %v", err, err)
-	}
-	if cfgErr.Type != ErrValidation {
-		t.Errorf("expected ErrValidation, got %q", cfgErr.Type)
-	}
-}

@@ -82,7 +82,7 @@ func NewStubEmailProvider(logger *slog.Logger) *StubEmailProvider {
 func (s *StubEmailProvider) Send(ctx context.Context, input types.SendInput) (string, error) {
 	s.logger.InfoContext(ctx, "stub: Send email called",
 		"to", input.To,
-		"template_id", input.TemplateID,
+		"subject", input.Subject,
 		"from", input.From.Address,
 	)
 	return fmt.Sprintf("msg_stub_%s", input.ReferenceID), nil
@@ -175,24 +175,6 @@ func (s *StubWebhookVerifier) Verify(payload []byte, header string, secret strin
 	return nil
 }
 
-// StubEmailVerifier implements EmailVerifier by always returning valid.
-// Used when config.IsTestMode is true or APP_ENV=local.
-type StubEmailVerifier struct {
-	logger *slog.Logger
-}
-
-// NewStubEmailVerifier creates a new StubEmailVerifier.
-func NewStubEmailVerifier(logger *slog.Logger) *StubEmailVerifier {
-	return &StubEmailVerifier{logger: logger}
-}
-
-func (s *StubEmailVerifier) Verify(payload []byte, signature string, timestamp string, publicKey string) (bool, error) {
-	s.logger.Info("stub: SendGrid email Verify called",
-		"payload_len", len(payload),
-	)
-	return true, nil
-}
-
 // StubRunPodClient implements RunPodClient by logging calls and returning
 // predictable job IDs. Used when config.IsTestMode is true or APP_ENV=local.
 type StubRunPodClient struct {
@@ -229,5 +211,4 @@ var _ EmailProvider = (*StubEmailProvider)(nil)
 var _ OAuthProvider = (*StubOAuthProvider)(nil)
 var _ OAuthManager = (*StubOAuthManager)(nil)
 var _ WebhookVerifier = (*StubWebhookVerifier)(nil)
-var _ EmailVerifier = (*StubEmailVerifier)(nil)
 var _ RunPodClient = (*StubRunPodClient)(nil)

@@ -38,7 +38,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
@@ -498,7 +497,6 @@ func main() {
 	}
 
 	// Email-specific configuration.
-	templatesJSON := os.Getenv("EMAIL_TEMPLATES_JSON")
 	fromAddress := os.Getenv("EMAIL_FROM_ADDRESS")
 	if fromAddress == "" {
 		fromAddress = "alerts@watchpoint.io"
@@ -512,40 +510,27 @@ func main() {
 	sqsClient := sqs.NewFromConfig(awsCfg)
 	cwClient := cloudwatch.NewFromConfig(awsCfg)
 
-	// Initialize EmailProvider.
-	// In production, this would use SendGrid. For now, use a stub if
-	// SENDGRID_API_KEY is not set (development/testing mode).
-	var emailProvider external.EmailProvider
-	sendgridKey := os.Getenv("SENDGRID_API_KEY")
-	if sendgridKey == "" {
-		logger.Warn("SENDGRID_API_KEY not set, using stub email provider")
-		emailProvider = external.NewStubEmailProvider(logger)
-	} else {
-		emailProvider = external.NewSendGridClient(
-			&http.Client{Timeout: 10 * time.Second},
-			external.SendGridClientConfig{
-				APIKey: sendgridKey,
-				Logger: logger,
-			},
-		)
-	}
+	// Initialize EmailProvider (AWS SES).
+	// Uses IAM roles for authentication — no API key needed.
+	emailProvider := external.NewSESClient(awsCfg, external.SESClientConfig{
+		Logger: logger.With("client", "ses"),
+	})
 
-	// Initialize TemplateEngine.
-	tmplEngine, err := emailpkg.NewTemplateEngine(emailpkg.TemplateEngineConfig{
-		TemplatesJSON:   templatesJSON,
+	// Initialize Renderer (client-side template rendering via go:embed).
+	renderer, err := emailpkg.NewRenderer(emailpkg.RendererConfig{
 		DefaultFromAddr: fromAddress,
 		DefaultFromName: fromName,
 		Logger:          typedLogger,
 	})
 	if err != nil {
-		logger.Error("Failed to initialize template engine", "error", err)
+		logger.Error("Failed to initialize template renderer", "error", err)
 		os.Exit(1)
 	}
 
 	// Initialize EmailChannel.
 	emailChannel := emailpkg.NewEmailChannel(emailpkg.EmailChannelConfig{
 		Provider:  emailProvider,
-		Templates: tmplEngine,
+		Templates: renderer,
 		Logger:    typedLogger,
 	})
 

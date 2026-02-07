@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+
 	"watchpoint/internal/config"
 )
 
@@ -19,7 +21,7 @@ import (
 
 // ClientRegistry holds all external service client interfaces. It is the single
 // point of access for the rest of the application to interact with third-party
-// services (Stripe, SendGrid, OAuth providers, RunPod).
+// services (Stripe, AWS SES, OAuth providers, RunPod).
 type ClientRegistry struct {
 	Billing BillingService
 	Email   EmailProvider
@@ -28,7 +30,6 @@ type ClientRegistry struct {
 
 	// Verifiers
 	StripeVerifier WebhookVerifier
-	EmailVerifier  EmailVerifier
 }
 
 // RegistryOption is a functional option for configuring a ClientRegistry.
@@ -58,7 +59,7 @@ func WithOrgBillingLookup(lookup OrgBillingLookup) RegistryOption {
 //
 // This function matches the architecture specification in Section 7 of
 // 10-external-integrations.md.
-func NewClientRegistry(cfg *config.Config, logger *slog.Logger, opts ...RegistryOption) (*ClientRegistry, error) {
+func NewClientRegistry(cfg *config.Config, awsCfg aws.Config, logger *slog.Logger, opts ...RegistryOption) (*ClientRegistry, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -83,7 +84,7 @@ func NewClientRegistry(cfg *config.Config, logger *slog.Logger, opts ...Registry
 	logger.Info("initializing external clients in PRODUCTION mode",
 		"environment", cfg.Environment,
 	)
-	return newProductionRegistry(cfg, logger, rc)
+	return newProductionRegistry(cfg, awsCfg, logger, rc)
 }
 
 // newStubRegistry creates a ClientRegistry populated entirely with stub
@@ -98,13 +99,12 @@ func newStubRegistry(logger *slog.Logger) *ClientRegistry {
 		OAuth:          NewStubOAuthManager(stubLogger, "google", "github"),
 		RunPod:         NewStubRunPodClient(stubLogger),
 		StripeVerifier: NewStubWebhookVerifier(stubLogger),
-		EmailVerifier:  NewStubEmailVerifier(stubLogger),
 	}
 }
 
 // newProductionRegistry creates a ClientRegistry with real client implementations
 // configured with strict timeouts and resilience patterns.
-func newProductionRegistry(cfg *config.Config, logger *slog.Logger, rc *registryConfig) (*ClientRegistry, error) {
+func newProductionRegistry(cfg *config.Config, awsCfg aws.Config, logger *slog.Logger, rc *registryConfig) (*ClientRegistry, error) {
 	reg := &ClientRegistry{}
 
 	// --- Billing (Stripe) ---
@@ -118,16 +118,11 @@ func newProductionRegistry(cfg *config.Config, logger *slog.Logger, rc *registry
 	// Stripe webhook verifier (real implementation).
 	reg.StripeVerifier = &StripeVerifier{}
 
-	// --- Email (SendGrid) ---
-	// Timeout: 10 seconds per architecture spec (Section 5.4).
-	sendgridHTTPClient := &http.Client{Timeout: 10 * time.Second}
-	reg.Email = NewSendGridClient(sendgridHTTPClient, SendGridClientConfig{
-		APIKey: cfg.Email.SendGridAPIKey.Unmask(),
-		Logger: logger.With("client", "sendgrid"),
+	// --- Email (AWS SES) ---
+	// Uses IAM-based auth via the AWS SDK config. No API key needed.
+	reg.Email = NewSESClient(awsCfg, SESClientConfig{
+		Logger: logger.With("client", "ses"),
 	})
-
-	// SendGrid email verifier (real implementation).
-	reg.EmailVerifier = &SendGridVerifier{}
 
 	// --- RunPod (Inference) ---
 	// Timeout: 30 seconds for RunPod API calls (trigger/cancel, not the job itself).

@@ -50,30 +50,16 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// Email Integration (SendGrid) — Section 5
+// Email Integration (AWS SES) — Section 5
 // ---------------------------------------------------------------------------
 
-// EmailProvider abstracts interactions with the email delivery service (SendGrid).
-// Implementations map domain inputs to provider-specific template calls.
+// EmailProvider abstracts interactions with the email delivery service (AWS SES).
+// Implementations transmit pre-rendered email content (Subject, BodyHTML, BodyText).
 type EmailProvider interface {
-	// Send transmits an email using the provider's template engine.
+	// Send transmits an email with pre-rendered content.
 	// Returns the provider's message ID for tracking and correlation.
 	Send(ctx context.Context, input types.SendInput) (providerMsgID string, err error)
 }
-
-// EmailVerifier abstracts SendGrid webhook ECDSA signature verification.
-type EmailVerifier interface {
-	// Verify checks the ECDSA signature from X-Twilio-Email-Event-Webhook-Signature.
-	// Returns (true, nil) if the signature is valid, (false, nil) if invalid,
-	// or (false, err) if verification could not be performed.
-	Verify(payload []byte, signature string, timestamp string, publicKey string) (bool, error)
-}
-
-// SendGrid event type constants for bounce/complaint handling.
-const (
-	EventSendGridBounce    = "bounce"
-	EventSendGridComplaint = "spamreport"
-)
 
 // ---------------------------------------------------------------------------
 // Identity Integration (OAuth) — Section 6

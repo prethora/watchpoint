@@ -440,7 +440,6 @@ func TestSecretInventoryPaths(t *testing.T) {
 		{"Database URL", "database/url", "/dev/watchpoint/database/url"},
 		{"Stripe Secret", "billing/stripe_secret_key", "/dev/watchpoint/billing/stripe_secret_key"},
 		{"Stripe Public", "billing/stripe_publishable_key", "/dev/watchpoint/billing/stripe_publishable_key"},
-		{"SendGrid Key", "email/sendgrid_api_key", "/dev/watchpoint/email/sendgrid_api_key"},
 		{"RunPod Key", "forecast/runpod_api_key", "/dev/watchpoint/forecast/runpod_api_key"},
 		{"Google Secret", "auth/google_secret", "/dev/watchpoint/auth/google_secret"},
 		{"GitHub Secret", "auth/github_secret", "/dev/watchpoint/auth/github_secret"},
@@ -477,7 +476,6 @@ func TestParameterTypeAssignment(t *testing.T) {
 	secureEntries := []string{
 		"/dev/watchpoint/database/url",
 		"/dev/watchpoint/billing/stripe_secret_key",
-		"/dev/watchpoint/email/sendgrid_api_key",
 		"/dev/watchpoint/forecast/runpod_api_key",
 		"/dev/watchpoint/auth/google_secret",
 		"/dev/watchpoint/auth/github_secret",

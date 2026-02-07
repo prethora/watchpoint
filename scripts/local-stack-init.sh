@@ -200,16 +200,6 @@ put_param "/${ENV}/watchpoint/billing/stripe_publishable_key" \
     "pk_test_local_dummy_stripe_publishable_key" \
     "String"
 
-# Email (SendGrid)
-put_param "/${ENV}/watchpoint/email/sendgrid_api_key" \
-    "SG.local_dummy_sendgrid_api_key" \
-    "SecureString"
-
-# Email Templates JSON (minimal valid mapping for local dev)
-put_param "/${ENV}/watchpoint/email/templates_json" \
-    '{"default":{"threshold_crossed":"d-local-template-001","alert_resolved":"d-local-template-002"}}' \
-    "String"
-
 # Forecast (RunPod)
 put_param "/${ENV}/watchpoint/forecast/runpod_api_key" \
     "rp_local_dummy_runpod_api_key" \
@@ -264,8 +254,6 @@ echo "   - /${ENV}/watchpoint/database/url"
 echo "   - /${ENV}/watchpoint/billing/stripe_secret_key"
 echo "   - /${ENV}/watchpoint/billing/stripe_webhook_secret"
 echo "   - /${ENV}/watchpoint/billing/stripe_publishable_key"
-echo "   - /${ENV}/watchpoint/email/sendgrid_api_key"
-echo "   - /${ENV}/watchpoint/email/templates_json"
 echo "   - /${ENV}/watchpoint/forecast/runpod_api_key"
 echo "   - /${ENV}/watchpoint/auth/session_key"
 echo "   - /${ENV}/watchpoint/security/admin_api_key"

@@ -130,17 +130,6 @@ func BuildInventory(v *Validator) []BootstrapStep {
 			Phase:    "External Accounts",
 		},
 		{
-			HumanLabel:     "SendGrid API Key",
-			SSMCategoryKey: "email/sendgrid_api_key",
-			ParamType:      ParamSecureString,
-			Source:         SourcePrompt,
-			Prompt: `1. Go to SendGrid > Settings > API Keys > Create API Key (Full Access).
-   2. Paste the Key (SG...) here:`,
-			ValidateFn: v.ValidateSendGridKey,
-			IsSecret:   true,
-			Phase:      "External Accounts",
-		},
-		{
 			HumanLabel:     "RunPod API Key",
 			SSMCategoryKey: "forecast/runpod_api_key",
 			ParamType:      ParamSecureString,

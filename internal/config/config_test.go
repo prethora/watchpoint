@@ -151,10 +151,9 @@ func TestEnvconfigTags(t *testing.T) {
 		{reflect.TypeOf(FeatureConfig{}), "EnableEmail", "envconfig", "FEATURE_ENABLE_EMAIL"},
 
 		// EmailConfig
-		{reflect.TypeOf(EmailConfig{}), "SendGridAPIKey", "envconfig", "SENDGRID_API_KEY"},
 		{reflect.TypeOf(EmailConfig{}), "FromAddress", "envconfig", "EMAIL_FROM_ADDRESS"},
 		{reflect.TypeOf(EmailConfig{}), "FromName", "envconfig", "EMAIL_FROM_NAME"},
-		{reflect.TypeOf(EmailConfig{}), "Templates", "envconfig", "EMAIL_TEMPLATES_JSON"},
+		{reflect.TypeOf(EmailConfig{}), "SESRegion", "envconfig", "SES_REGION"},
 		{reflect.TypeOf(EmailConfig{}), "Provider", "envconfig", "EMAIL_PROVIDER"},
 
 		// ForecastConfig
@@ -214,8 +213,6 @@ func TestValidateTags(t *testing.T) {
 		{reflect.TypeOf(BillingConfig{}), "StripeSecretKey", "required"},
 		{reflect.TypeOf(BillingConfig{}), "StripeWebhookSecret", "required"},
 		{reflect.TypeOf(BillingConfig{}), "StripePublishableKey", "required"},
-		{reflect.TypeOf(EmailConfig{}), "SendGridAPIKey", "required"},
-		{reflect.TypeOf(EmailConfig{}), "Templates", "required,json"},
 		{reflect.TypeOf(ForecastConfig{}), "RunPodAPIKey", "required"},
 		{reflect.TypeOf(ForecastConfig{}), "RunPodEndpointID", "required"},
 		{reflect.TypeOf(AuthConfig{}), "SessionKey", "required,min=32"},
@@ -261,7 +258,8 @@ func TestDefaultTags(t *testing.T) {
 		{reflect.TypeOf(FeatureConfig{}), "EnableEmail", "true"},
 		{reflect.TypeOf(EmailConfig{}), "FromAddress", "alerts@watchpoint.io"},
 		{reflect.TypeOf(EmailConfig{}), "FromName", "WatchPoint Alerts"},
-		{reflect.TypeOf(EmailConfig{}), "Provider", "sendgrid"},
+		{reflect.TypeOf(EmailConfig{}), "SESRegion", "us-east-1"},
+		{reflect.TypeOf(EmailConfig{}), "Provider", "ses"},
 		{reflect.TypeOf(ForecastConfig{}), "UpstreamMirrors", "noaa-gfs-bdp-pds,aws-noaa-gfs"},
 		{reflect.TypeOf(ForecastConfig{}), "TimeoutMediumRange", "3h"},
 		{reflect.TypeOf(ForecastConfig{}), "TimeoutNowcast", "20m"},
@@ -326,7 +324,6 @@ func TestSecretStringFields(t *testing.T) {
 		{reflect.TypeOf(DatabaseConfig{}), "URL"},
 		{reflect.TypeOf(BillingConfig{}), "StripeSecretKey"},
 		{reflect.TypeOf(BillingConfig{}), "StripeWebhookSecret"},
-		{reflect.TypeOf(EmailConfig{}), "SendGridAPIKey"},
 		{reflect.TypeOf(ForecastConfig{}), "RunPodAPIKey"},
 		{reflect.TypeOf(AuthConfig{}), "GoogleClientSecret"},
 		{reflect.TypeOf(AuthConfig{}), "GithubClientSecret"},
@@ -395,9 +392,7 @@ func TestConfigSecretFieldsJSONRedaction(t *testing.T) {
 		Security: SecurityConfig{
 			AdminAPIKey: "admin-key-123",
 		},
-		Email: EmailConfig{
-			SendGridAPIKey: "SG.test-key",
-		},
+		Email: EmailConfig{},
 		Forecast: ForecastConfig{
 			RunPodAPIKey: "runpod-key-123",
 		},
@@ -419,7 +414,6 @@ func TestConfigSecretFieldsJSONRedaction(t *testing.T) {
 		"google-secret",
 		"github-secret",
 		"admin-key-123",
-		"SG.test-key",
 		"runpod-key-123",
 	}
 

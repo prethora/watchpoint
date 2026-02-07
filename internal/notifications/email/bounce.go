@@ -10,7 +10,7 @@ import (
 )
 
 // FeedbackType classifies the kind of asynchronous email feedback received
-// from the provider (e.g., SendGrid bounce webhook).
+// from the email provider (e.g., AWS SES via SNS).
 //
 // Architecture reference: 08b-email-worker.md Section 6.1
 type FeedbackType string
@@ -28,7 +28,7 @@ const (
 //
 // Architecture reference: 08b-email-worker.md Section 6.1
 type BounceEvent struct {
-	// ProviderMessageID is the provider's message identifier (e.g., SendGrid message ID).
+	// ProviderMessageID is the provider's message identifier (e.g., SES message ID).
 	// Used to correlate the bounce with the original delivery record.
 	ProviderMessageID string
 
@@ -105,8 +105,9 @@ type UserEmailLookup interface {
 }
 
 // BounceProcessor handles asynchronous email feedback (bounces and complaints)
-// from the email provider. It coordinates delivery status updates, channel
-// health tracking, and owner notification when channels are disabled.
+// from the email provider (AWS SES via SNS). It coordinates delivery status
+// updates, channel health tracking, and owner notification when channels are
+// disabled.
 //
 // Architecture reference: 08b-email-worker.md Section 6.2
 // Flow coverage: NOTIF-006 (Bounce Handling), USER-014 (Notify Owner)
@@ -251,26 +252,31 @@ func (b *BounceProcessor) notifyOwner(ctx context.Context, orgID string, bounced
 		return fmt.Errorf("notify owner: get owner email: %w", err)
 	}
 
-	// Step 3 (USER-014): Resolve the system alert template.
-	tmplID, err := b.templates.Resolve("system", types.EventSystemAlert)
+	// Step 3 (USER-014): Render the system alert template.
+	alertNotification := &types.Notification{
+		ID:             "system-bounce-alert",
+		OrganizationID: orgID,
+		EventType:      types.EventSystemAlert,
+		TemplateSet:    "system",
+		Payload: map[string]interface{}{
+			"bounced_address": bouncedAddress,
+			"organization_id": orgID,
+			"disabled_reason": "Email channel disabled due to repeated delivery failures",
+		},
+	}
+
+	rendered, sender, err := b.templates.Render("system", types.EventSystemAlert, alertNotification)
 	if err != nil {
-		return fmt.Errorf("notify owner: resolve system alert template: %w", err)
+		return fmt.Errorf("notify owner: render system alert template: %w", err)
 	}
 
 	// Step 4 (USER-014): Send the alert email to the owner.
 	_, err = b.emailProvider.Send(ctx, types.SendInput{
-		To: ownerEmail,
-		From: types.SenderIdentity{
-			Name:    "WatchPoint System",
-			Address: "system@watchpoint.io",
-		},
-		TemplateID: tmplID,
-		TemplateData: map[string]interface{}{
-			"bounced_address":   bouncedAddress,
-			"organization_id":   orgID,
-			"event_type":        string(types.EventSystemAlert),
-			"disabled_reason":   "Email channel disabled due to repeated delivery failures",
-		},
+		To:          ownerEmail,
+		From:        sender,
+		Subject:     rendered.Subject,
+		BodyHTML:    rendered.BodyHTML,
+		BodyText:    rendered.BodyText,
 	})
 	if err != nil {
 		return fmt.Errorf("notify owner: send system alert: %w", err)

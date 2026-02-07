@@ -68,7 +68,6 @@ func allSSMValues() map[string]string {
 		"/dev/watchpoint/database/url":                   "postgres://user:pass@host:6543/db",
 		"/dev/watchpoint/billing/stripe_secret_key":      "sk_test_abc123def456ghi789jkl012",
 		"/dev/watchpoint/billing/stripe_publishable_key": "pk_test_abc123def456ghi789jkl012",
-		"/dev/watchpoint/email/sendgrid_api_key":         "SG.test_sendgrid_key_value_here",
 		"/dev/watchpoint/forecast/runpod_api_key":        "rp_test_runpod_key_value_here_long",
 		"/dev/watchpoint/forecast/runpod_endpoint_id":    "vllm-test-endpoint-123",
 		"/dev/watchpoint/auth/google_client_id":          "1234567890.apps.googleusercontent.com",
@@ -120,7 +119,6 @@ func TestSSMToEnvMapping_MatchesConfigEnvTags(t *testing.T) {
 		"database/url":                   "DATABASE_URL",
 		"billing/stripe_secret_key":      "STRIPE_SECRET_KEY",
 		"billing/stripe_publishable_key": "STRIPE_PUBLISHABLE_KEY",
-		"email/sendgrid_api_key":         "SENDGRID_API_KEY",
 		"forecast/runpod_api_key":        "RUNPOD_API_KEY",
 		"forecast/runpod_endpoint_id":    "RUNPOD_ENDPOINT_ID",
 		"auth/google_client_id":          "GOOGLE_CLIENT_ID",
@@ -418,9 +416,6 @@ func TestExportEnvFile_PartialSSMFailure(t *testing.T) {
 	}
 
 	// Missing values should not be in the file.
-	if strings.Contains(text, "SENDGRID_API_KEY=") {
-		t.Error("output should not contain SENDGRID_API_KEY (not in SSM)")
-	}
 	if strings.Contains(text, "RUNPOD_API_KEY=") {
 		t.Error("output should not contain RUNPOD_API_KEY (not in SSM)")
 	}
@@ -447,7 +442,6 @@ func TestExportEnvFile_StagingEnvironment(t *testing.T) {
 		"/staging/watchpoint/database/url":                   "postgres://user:pass@staging-host:6543/db",
 		"/staging/watchpoint/billing/stripe_secret_key":      "sk_test_staging_key",
 		"/staging/watchpoint/billing/stripe_publishable_key": "pk_test_staging_key",
-		"/staging/watchpoint/email/sendgrid_api_key":         "SG.staging_key",
 		"/staging/watchpoint/forecast/runpod_api_key":        "rp_staging_key_long_enough",
 		"/staging/watchpoint/forecast/runpod_endpoint_id":    "vllm-staging-endpoint",
 		"/staging/watchpoint/auth/google_client_id":          "staging.apps.googleusercontent.com",
@@ -556,7 +550,7 @@ func TestExportEnvFile_StderrOutput(t *testing.T) {
 	if !strings.Contains(output, "Environment file exported") {
 		t.Error("stderr missing export confirmation message")
 	}
-	if !strings.Contains(output, "Parameters written: 12") {
+	if !strings.Contains(output, "Parameters written: 11") {
 		t.Errorf("stderr missing parameter count, got:\n%s", output)
 	}
 	if !strings.Contains(output, "0600") {

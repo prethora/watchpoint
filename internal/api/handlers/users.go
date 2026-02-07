@@ -316,7 +316,7 @@ func (h *UserHandler) Invite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Send invite email.
-	// Per USER-004: Return 500 if SendGrid fails so admin knows the invite didn't go out.
+	// Per USER-004: Return 500 if email provider fails so admin knows the invite didn't go out.
 	inviteURL := fmt.Sprintf(inviteURLTemplate, rawToken)
 	if h.emailService != nil {
 		if err := h.emailService.SendInvite(r.Context(), req.Email, inviteURL, req.Role); err != nil {

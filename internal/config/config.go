@@ -106,15 +106,14 @@ type FeatureConfig struct {
 	EnableEmail   bool `envconfig:"FEATURE_ENABLE_EMAIL" default:"true"`
 }
 
-// EmailConfig holds email delivery provider credentials and template configuration.
+// EmailConfig holds email delivery provider configuration.
+// Email delivery uses AWS SES with IAM authentication (no API key required).
+// Templates are rendered client-side using Go's html/template.
 type EmailConfig struct {
-	SendGridAPIKey SecretString `envconfig:"SENDGRID_API_KEY" validate:"required"`
-	FromAddress    string       `envconfig:"EMAIL_FROM_ADDRESS" default:"alerts@watchpoint.io"`
-	FromName       string       `envconfig:"EMAIL_FROM_NAME" default:"WatchPoint Alerts"`
-	// Templates is a JSON mapping: "template_set" -> "event_type" -> "provider_id"
-	// Example: {"default": {"threshold_crossed": "d-123..."}}
-	Templates string `envconfig:"EMAIL_TEMPLATES_JSON" validate:"required,json"`
-	Provider  string `envconfig:"EMAIL_PROVIDER" default:"sendgrid"`
+	FromAddress string `envconfig:"EMAIL_FROM_ADDRESS" default:"alerts@watchpoint.io"`
+	FromName    string `envconfig:"EMAIL_FROM_NAME" default:"WatchPoint Alerts"`
+	SESRegion   string `envconfig:"SES_REGION" default:"us-east-1"`
+	Provider    string `envconfig:"EMAIL_PROVIDER" default:"ses"`
 }
 
 // ForecastConfig holds forecast data source and inference configuration.

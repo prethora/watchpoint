@@ -2,12 +2,12 @@
 //
 // It initializes the configuration, creates the database connection pool,
 // wires real repositories and services for internal dependencies, uses stub
-// implementations for external third-party services (Stripe, SendGrid, OAuth)
+// implementations for external third-party services (Stripe, SES, OAuth)
 // that require real API keys, and starts the HTTP server.
 //
 // In local mode (APP_ENV=local), it runs as a standard HTTP server on the
-// configured port. In Lambda mode, it will use the chiadapter to bridge API
-// Gateway events to the chi router.
+// configured port. In Lambda mode, it will use the chiadapter to bridge
+// API Gateway events to the chi router.
 //
 // Graceful shutdown is handled via OS signal interception (SIGINT, SIGTERM).
 package main
@@ -156,7 +156,7 @@ func run() error {
 	// -------------------------------------------------------------------
 	// These are stubbed because they interact with third-party APIs.
 	// In production, these would be replaced with real implementations
-	// using config.Billing.StripeSecretKey, config.Email.SendGridKey, etc.
+	// using config.Billing.StripeSecretKey, AWS SES (IAM), etc.
 	stubBillingSvc := external.NewStubBillingService(logger)
 	stubOAuthMgr := &oauthManagerAdapter{inner: external.NewStubOAuthManager(logger, "google", "github")}
 	stubWebhookVerifier := external.NewStubWebhookVerifier(logger)
@@ -600,16 +600,14 @@ type emailServiceAdapter struct {
 
 func (a *emailServiceAdapter) SendInvite(ctx context.Context, toEmail string, inviteURL string, role types.UserRole) error {
 	_, err := a.provider.Send(ctx, types.SendInput{
-		To:         toEmail,
-		TemplateID: "invite",
+		To: toEmail,
 		From: types.SenderIdentity{
 			Address: "noreply@watchpoint.io",
 			Name:    "WatchPoint",
 		},
-		TemplateData: map[string]interface{}{
-			"invite_url": inviteURL,
-			"role":       string(role),
-		},
+		Subject:     fmt.Sprintf("You've been invited to WatchPoint as %s", role),
+		BodyHTML:    fmt.Sprintf("<p>You've been invited to WatchPoint as <strong>%s</strong>.</p><p><a href=\"%s\">Accept Invitation</a></p>", role, inviteURL),
+		BodyText:    fmt.Sprintf("You've been invited to WatchPoint as %s.\n\nAccept: %s", role, inviteURL),
 		ReferenceID: fmt.Sprintf("invite_%s", toEmail),
 	})
 	return err

@@ -52,7 +52,7 @@ migrate-down:
 mocks:
 	@rm -rf internal/external/mocks
 	go run github.com/vektra/mockery/v2@latest \
-		--name 'BillingService|WebhookVerifier|EmailProvider|EmailVerifier|OAuthProvider|OAuthManager|OrgBillingLookup' \
+		--name 'BillingService|WebhookVerifier|EmailProvider|OAuthProvider|OAuthManager|OrgBillingLookup' \
 		--case snake \
 		--outpkg mocks \
 		--output internal/external/mocks \
