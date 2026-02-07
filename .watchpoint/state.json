@@ -2474,11 +2474,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Script exists. Running with `--mock` successfully populates the target S3 bucket with dummy weight files.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-07T19:46:10.155985+00:00",
+        "completed_at": "2026-02-07T19:49:18.240818+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
