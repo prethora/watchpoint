@@ -64,7 +64,7 @@ All architecture specs live in `architecture/`. These are the authoritative refe
 - `06-batcher.md` — S3 event processing, tile-based batching, SQS dispatch
 - `07-eval-worker.md` — Python evaluation engine, Zarr reading, threshold evaluation
 - `08a-notification-core.md` — Notification routing, deduplication, channel dispatch
-- `08b-email-worker.md` — SendGrid integration, template rendering
+- `08b-email-worker.md` — AWS SES integration, client-side template rendering
 - `08c-webhook-worker.md` — Webhook delivery, retry logic, SSRF protection
 
 ### System
