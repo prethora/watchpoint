@@ -2563,11 +2563,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "`make migrate-cloud ENV=dev` successfully applies migrations to the remote database.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-07T20:01:31.009431+00:00",
+        "completed_at": "2026-02-07T20:03:52.659331+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {

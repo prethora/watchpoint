@@ -1,4 +1,4 @@
-.PHONY: test build clean migrate-up migrate-down mocks lint-python run-job run-stack stop-stack \
+.PHONY: test build clean migrate-up migrate-down migrate-cloud mocks lint-python run-job run-stack stop-stack \
        build-lambda build-images build-all deploy-cloud
 
 # Git commit SHA used for tagging build artifacts
@@ -45,6 +45,47 @@ migrate-up:
 # Roll back all database migrations
 migrate-down:
 	$(MIGRATE_CMD) down -all
+
+# ---------------------------------------------------------------------------
+# Remote database migration: apply migrations to the cloud database
+# ---------------------------------------------------------------------------
+# Fetches DATABASE_URL from SSM Parameter Store (SecureString), then runs
+# golang-migrate against the remote Supabase instance.
+#
+# Usage:
+#   make migrate-cloud ENV=dev
+#   make migrate-cloud ENV=staging
+#   make migrate-cloud ENV=prod
+#
+# Requires:
+#   - AWS CLI configured with credentials that can read SSM parameters
+#   - The SSM parameter /{ENV}/watchpoint/database/url must exist
+#   - Docker must be running (uses the golang-migrate image)
+migrate-cloud:
+	@if echo "$(VALID_ENVS)" | grep -qw "$(ENV)"; then \
+		true; \
+	else \
+		echo "Error: ENV must be one of: $(VALID_ENVS) (got '$(ENV)')"; \
+		exit 1; \
+	fi
+	@echo "Fetching DATABASE_URL from SSM (/$(ENV)/watchpoint/database/url)..."
+	@CLOUD_DB_URL=$$(aws ssm get-parameter \
+		--name "/$(ENV)/watchpoint/database/url" \
+		--with-decryption \
+		--query "Parameter.Value" \
+		--output text) && \
+	if [ -z "$$CLOUD_DB_URL" ]; then \
+		echo "Error: Failed to retrieve DATABASE_URL from SSM parameter /$(ENV)/watchpoint/database/url"; \
+		exit 1; \
+	fi && \
+	echo "Running migrations against $(ENV) database..." && \
+	docker run --rm \
+		-v $(PWD)/migrations:/migrations \
+		migrate/migrate \
+		-path=/migrations \
+		-database "$$CLOUD_DB_URL" \
+		up && \
+	echo "Migrations applied successfully to $(ENV)."
 
 # Generate mocks for all interfaces in internal/external using mockery.
 # Uses --name with a regex to target only true interfaces (excludes function types
