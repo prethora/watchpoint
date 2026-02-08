@@ -2666,11 +2666,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Script runs against the target environment. Inserting a dummy `pending_setup` param causes the script to fail.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-08T01:11:59.667203+00:00",
+        "completed_at": "2026-02-08T01:15:38.164247+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
