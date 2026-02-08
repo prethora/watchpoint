@@ -120,11 +120,14 @@ class ZarrWriter:
                 "compressor": self._compressor,
             }
 
-        # Write the Zarr store (Zarr v2 is the default for zarr < 3.0)
+        # Write the Zarr store in v2 format (required for numcodecs compressors).
+        # zarr v3 library defaults to zarr_format=3 which uses a different codec
+        # system; explicitly requesting v2 keeps numcodecs.Zstd compatible.
         padded_ds.to_zarr(
             destination,
             mode="w",
             encoding=encoding,
+            zarr_format=2,
         )
 
         # Write metadata attributes
@@ -335,7 +338,7 @@ class ZarrWriter:
 
         Metadata schema from 11-runpod.md Section 3.5.
         """
-        store = zarr.open(destination, mode="r+")
+        store = zarr.open(destination, mode="r+", zarr_format=2)
         store.attrs["model_name"] = self.model_name
         store.attrs["model_version"] = self.model_version
         store.attrs["schema_version"] = SCHEMA_VERSION
