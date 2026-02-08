@@ -104,7 +104,10 @@ RUN mv /usr/local/cuda /usr/local/_cuda_hidden && \
     mv /usr/local/_cuda_hidden /usr/local/cuda
 
 # Step 3: Install remaining requirements (torch + earth2grid satisfied).
-RUN python3 -m pip install --no-cache-dir \
+# --no-binary natten forces NATTEN to compile from source using nvcc instead
+# of downloading a CPU-only wheel from PyPI. This produces CUDA kernels for
+# the architectures listed in TORCH_CUDA_ARCH_LIST (set in ENV above).
+RUN python3 -m pip install --no-cache-dir --no-binary natten \
     -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
