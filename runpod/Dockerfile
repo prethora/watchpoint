@@ -4,15 +4,15 @@
 # Builds the Python-based GPU inference worker for RunPod Serverless.
 #
 # Architecture: linux/amd64 (NVIDIA GPU instances)
-# Base image:   nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+# Base image:   nvidia/cuda:12.4.0-cudnn-runtime-ubuntu22.04
 # Entrypoint:   handler.py (RunPod Serverless handler)
 #
 # Build context: Project root (.)
 # Build command: docker build --platform linux/amd64 -f runpod/Dockerfile .
 #
-# Model weights are NOT baked into the image. They are loaded at runtime
-# from a persistent RunPod Network Volume mounted at /runpod-volume/weights.
-# On cold start, the worker auto-hydrates missing weights from S3.
+# Model weights are NOT baked into the image. They are auto-downloaded by
+# Earth-2 Studio on first inference and cached at EARTH2STUDIO_CACHE on the
+# persistent RunPod Network Volume.
 #
 # References:
 #   - 11-runpod.md Section 6.1 (Docker Specification)
@@ -21,9 +21,9 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Base: NVIDIA CUDA Runtime with cuDNN (required for PyTorch/ONNX inference)
+# Base: NVIDIA CUDA 12.x Runtime with cuDNN (required for Earth-2 Studio)
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.0-cudnn-runtime-ubuntu22.04
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -31,29 +31,38 @@ FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 # PYTHONUNBUFFERED: Ensure real-time log output in RunPod console.
 # DEBIAN_FRONTEND: Suppress interactive prompts during apt-get.
 # MODEL_WEIGHTS_PATH: Default network volume mount point for model weights.
+# EARTH2STUDIO_CACHE: Cache directory for E2S model weights (auto-download).
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    MODEL_WEIGHTS_PATH="/runpod-volume/weights"
+    MODEL_WEIGHTS_PATH="/runpod-volume/weights" \
+    EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio"
 
 # ---------------------------------------------------------------------------
 # System dependencies
 # ---------------------------------------------------------------------------
-# python3.11: Runtime interpreter matching the project standard.
+# python3.12: Runtime interpreter (E2S recommendation).
 # python3-pip: Package installer for Python dependencies.
-# python3.11-venv: Required for pip to function correctly on Ubuntu 22.04.
+# python3.12-venv: Required for pip to function correctly on Ubuntu 22.04.
+# build-essential: Required for natten compilation (Atlas dependency).
 # git: Needed by some Python packages that install from git repos.
 # Clean up apt caches to minimize layer size.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.11 \
+        software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.12 \
+        python3.12-dev \
         python3-pip \
-        python3.11-venv \
+        python3.12-venv \
+        build-essential \
         git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3.11 the default python3.
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+# Make python3.12 the default python3.
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
 # ---------------------------------------------------------------------------
 # Python dependencies
@@ -61,7 +70,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 # Copy requirements first to leverage Docker layer caching.
 # runpod/requirements.txt contains all needed dependencies:
 #   - RunPod SDK, data science stack (numpy, xarray, zarr, s3fs, pandas)
-#   - ML inference (torch, onnxruntime-gpu)
+#   - ML inference (earth2studio[atlas,stormscope], scipy)
 #   - Infrastructure (boto3, pydantic)
 #   - Local simulator deps (fastapi, uvicorn, httpx)
 COPY runpod/requirements.txt /tmp/requirements.txt
@@ -81,6 +90,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY runpod/__init__.py /app/__init__.py
 COPY runpod/handler.py /app/handler.py
 COPY runpod/mock_engine.py /app/mock_engine.py
+COPY runpod/atlas_engine.py /app/atlas_engine.py
+COPY runpod/nowcast_engine.py /app/nowcast_engine.py
+COPY runpod/canonical_translator.py /app/canonical_translator.py
+COPY runpod/regridder.py /app/regridder.py
 COPY runpod/zarr_writer.py /app/zarr_writer.py
 COPY runpod/sim.py /app/sim.py
 

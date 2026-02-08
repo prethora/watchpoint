@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import xarray as xr
@@ -68,8 +68,22 @@ class ModelEngine(ABC):
         ...
 
     @abstractmethod
-    def predict(self, input_xr: xr.Dataset) -> xr.Dataset:
-        """Run inference and return a canonical-variable Dataset."""
+    def predict(
+        self,
+        run_timestamp: str,
+        input_config: dict[str, Any] | None = None,
+    ) -> xr.Dataset:
+        """
+        Run inference and return a canonical-variable Dataset.
+
+        Parameters
+        ----------
+        run_timestamp : str
+            ISO 8601 timestamp for the forecast run. Real engines use this
+            to fetch the correct initial conditions via Earth-2 Studio.
+        input_config : dict, optional
+            Additional configuration (e.g. calibration coefficients for nowcast).
+        """
         ...
 
 
@@ -110,12 +124,17 @@ class MockEngine(ModelEngine):
         """No-op for mock engine -- no weights to load."""
         pass
 
-    def predict(self, input_xr: xr.Dataset) -> xr.Dataset:
+    def predict(
+        self,
+        run_timestamp: str,
+        input_config: dict[str, Any] | None = None,
+    ) -> xr.Dataset:
         """
         Generate a synthetic forecast Dataset.
 
-        The *input_xr* parameter is accepted for interface compatibility
-        but is ignored; the mock engine synthesizes data from scratch.
+        Both *run_timestamp* and *input_config* are accepted for interface
+        compatibility but are ignored; the mock engine synthesizes data
+        from scratch.
 
         Returns an xarray.Dataset with:
           - coords: time (Unix int64), lat (float32), lon (float32)

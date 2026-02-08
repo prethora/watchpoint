@@ -1,8 +1,8 @@
 # 11 - RunPod Inference Worker
 
-> **Purpose**: Defines the architecture for the GPU-accelerated inference worker hosted on RunPod Serverless. This component is responsible for running heavy ML models (Atlas/StormScope), translating raw outputs into canonical variables, and writing optimized Zarr stores to S3.
-> **Package**: `worker/runpod` (Python 3.11)
-> **Dependencies**: `01-foundation-types.md` (Variable Definitions), `03-config.md` (Secrets)
+> **Purpose**: Defines the architecture for the GPU-accelerated inference worker hosted on RunPod Serverless. This component is responsible for running heavy ML models (Atlas/StormScope) via NVIDIA Earth-2 Studio, translating raw outputs into canonical variables, and writing optimized Zarr stores to S3.
+> **Package**: `worker/runpod` (Python 3.12)
+> **Dependencies**: `01-foundation-types.md` (Variable Definitions), `03-config.md` (Secrets), Earth-2 Studio 0.12.1
 
 ---
 
@@ -24,8 +24,8 @@
 The RunPod Inference Worker is a stateless, containerized Python application that executes on-demand when triggered by the `data-poller`. It decouples heavy compute from the AWS Lambda environment.
 
 ### Key Responsibilities
-*   **Inference**: Loading and executing PyTorch/ONNX models on GPU.
-*   **Translation**: Converting model-specific physics units (e.g., Kelvin) to system canonicals (e.g., Celsius).
+*   **Inference**: Running GPU inference via NVIDIA Earth-2 Studio (E2S). Atlas uses `run.deterministic` for end-to-end workflows. StormScope uses a custom autoregressive loop with coupled GOES+MRMS models.
+*   **Translation**: Converting model-specific physics units (e.g., Kelvin) to system canonicals (e.g., Celsius) via `CanonicalTranslator`.
 *   **Storage**: Writing `Zstd`-compressed Zarr arrays to S3 with a strict chunking strategy compatible with the Evaluation Engine.
 *   **Validation**: Ensuring input data integrity and output physical sanity before committing results.
 
@@ -158,31 +158,63 @@ The worker uses a modular Python architecture to separate I/O from Inference.
 from abc import ABC, abstractmethod
 import xarray as xr
 
-class DataSource(ABC):
-    """Abstracts S3 I/O for upstream data (GFS/GOES)."""
-    @abstractmethod
-    def fetch(self, paths: list[str]) -> xr.Dataset: pass
-
 class ModelEngine(ABC):
-    """Abstracts the GPU Inference (Torch/ONNX)."""
+    """Abstracts GPU inference via Earth-2 Studio."""
     @abstractmethod
     def load_weights(self, path: str): pass
-    
+
     @abstractmethod
-    def predict(self, input_xr: xr.Dataset) -> xr.Dataset: pass
+    def predict(self, run_timestamp: str, input_config: dict | None = None) -> xr.Dataset:
+        """
+        Run inference for the given timestamp.
+
+        Real engines use run_timestamp to fetch initial conditions via E2S.
+        input_config carries calibration coefficients (nowcast only).
+        Returns a canonical-variable Dataset.
+        """
+        pass
+
+class AtlasEngine(ModelEngine):
+    """Medium-range global forecasts via E2S Atlas + run.deterministic.
+
+    Uses earth2studio.run.deterministic for a simple end-to-end workflow:
+    automatic GFS data fetch -> GPU inference -> canonical output.
+    Produces 60 x 6h steps (15 days) on a 721x1440 global grid.
+    """
+    pass
+
+class NowcastEngine(ModelEngine):
+    """Short-range nowcast via coupled StormScopeGOES + StormScopeMRMS.
+
+    Custom autoregressive loop: each step runs GOES forecaster, then
+    MRMS forecaster conditioned on GOES output. Extracts composite
+    reflectivity (refc) and converts to precipitation via Marshall-Palmer.
+    Temperature/wind/humidity backfilled from GFS analysis.
+
+    Produces 6 x 1h steps on a 361x240 CONUS grid.
+    """
+    pass
+
+class MockEngine(ModelEngine):
+    """Generates synthetic data for local dev/CI without GPU."""
+    pass
 
 class CanonicalTranslator:
     """Handles unit conversion and probability derivation."""
-    def translate(self, raw: xr.Dataset, config: dict) -> xr.Dataset: pass
+    def translate_atlas(self, raw: xr.Dataset) -> xr.Dataset: pass
+    def translate_nowcast(self, refc, gfs_data, calibration, coords) -> xr.Dataset: pass
+    def validate(self, ds: xr.Dataset) -> None: pass
 
 class ZarrWriter:
-    """Handles chunking, compression, and S3 writes."""
+    """Handles chunking, compression, halo padding, and S3 writes."""
     def write(self, dataset: xr.Dataset, destination: str): pass
 
 class InferenceHandler:
-    """Orchestrator: Fetch -> Predict -> Translate -> Write."""
+    """Orchestrator: Predict -> Translate -> Write."""
     def run(self, request: dict) -> dict: pass
 ```
+
+**Data fetching**: Handled internally by E2S data sources (GFS, GOES, MRMS). The `DataSource` abstraction is no longer needed — E2S manages all upstream data access automatically.
 
 ### 4.2 Mock Mode
 
@@ -198,11 +230,15 @@ The worker creates an abstraction layer over model specifics.
 
 ### 5.1 Variable Mapping
 
-| Canonical Variable | Source (Atlas/GFS) | Transformation |
-| :--- | :--- | :--- |
-| `temperature_c` | `t2m` (Kelvin) | `t2m - 273.15` |
-| `wind_speed_kmh` | `u10`, `v10` (m/s) | `sqrt(u^2 + v^2) * 3.6` |
-| `precipitation_mm` | `tp` (m) | `tp * 1000` |
+| Canonical Variable | Source (Atlas) | Source (Nowcast) | Transformation |
+| :--- | :--- | :--- | :--- |
+| `temperature_c` | `t2m` (K) | GFS `t2m` (K) backfill | `t2m - 273.15` |
+| `wind_speed_kmh` | `u10m`, `v10m` (m/s) | GFS `u10m`, `v10m` backfill | `sqrt(u^2 + v^2) * 3.6` |
+| `precipitation_mm` | `tp` (m) | StormScope `refc` (dBZ) | Atlas: `tp * 1000`; Nowcast: Marshall-Palmer Z-R |
+| `precipitation_probability` | Sigmoid on `precipitation_mm` | Sigmoid on `refc` | Section 5.2 |
+| `humidity_percent` | `q`, `t2m`, `sp` | GFS `q`, `t2m`, `sp` backfill | Tetens formula for RH |
+
+**Nowcast backfill**: StormScope only predicts radar reflectivity. Temperature, wind, and humidity are sourced from GFS analysis data at the nowcast init time, replicated across all 6 hourly time steps.
 
 ### 5.2 Probability Derivation (Nowcast)
 
@@ -225,18 +261,17 @@ else:
 
 ### 6.1 Docker Specification
 
-Uses a Multi-Stage build to minimize image size.
-
 ```dockerfile
-# Base: NVIDIA CUDA Runtime
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+# Base: NVIDIA CUDA 12.x Runtime with cuDNN (required for Earth-2 Studio)
+FROM nvidia/cuda:12.4.0-cudnn-runtime-ubuntu22.04
 
 # Env
 ENV PYTHONUNBUFFERED=1
 ENV MODEL_WEIGHTS_PATH="/runpod-volume/weights"
+ENV EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio"
 
-# Dependencies
-RUN apt-get update && apt-get install -y python3.11 pip
+# Dependencies — Python 3.12 (E2S recommendation)
+RUN apt-get update && apt-get install -y python3.12 python3.12-dev build-essential pip
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
@@ -248,11 +283,14 @@ WORKDIR /app
 CMD [ "python3", "-u", "handler.py" ]
 ```
 
+**Key requirements**: CUDA 12.x (E2S requirement), Python 3.12, `build-essential` for natten compilation (Atlas dependency).
+
 ### 6.2 Model Weights Storage
 
-To prevent OOM during build and reduce cold start latency:
-*   **Network Volume**: Weights are stored on a persistent RunPod Network Volume mounted at `/runpod-volume/weights`.
-*   **Auto-Hydration**: On startup, if weights are missing, the worker downloads them from a secured S3 Artifact Bucket.
+Weights are managed by Earth-2 Studio's built-in cache mechanism:
+*   **Auto-Download**: E2S auto-downloads model weights from HuggingFace on first inference (Atlas: `hf://nvidia/atlas-era5`, StormScope: `hf://nvidia/stormscope-goes-mrms`).
+*   **Cache**: `EARTH2STUDIO_CACHE=/runpod-volume/weights/earth2studio` — stored on a persistent RunPod Network Volume, so weights survive cold starts and only download once.
+*   **No manual upload needed**: Unlike the original S3 auto-hydration approach, E2S handles all weight management internally.
 
 ---
 

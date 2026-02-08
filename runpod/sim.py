@@ -64,6 +64,7 @@ def _configure_s3_environment() -> None:
         "AWS_ENDPOINT_URL": "http://localhost:9000",
         "AWS_ACCESS_KEY_ID": "minioadmin",
         "AWS_SECRET_ACCESS_KEY": "minioadmin",
+        "EARTH2STUDIO_CACHE": "/tmp/earth2studio_cache",
     }
     for key, default_value in defaults.items():
         if key not in os.environ:

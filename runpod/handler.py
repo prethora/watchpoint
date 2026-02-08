@@ -23,8 +23,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import xarray as xr
-
 from mock_engine import MockEngine, ModelEngine, is_mock_mode
 from zarr_writer import SUCCESS_MARKER, TILE_LAT_CHUNK, TILE_LON_CHUNK, ZarrWriter
 
@@ -284,7 +282,10 @@ class InferenceHandler:
 
             # 5. Run prediction
             logger.info("Job %s: Running prediction with %s", job_id, type(engine).__name__)
-            dataset = engine.predict(input_xr=xr.Dataset())
+            dataset = engine.predict(
+                run_timestamp=payload.run_timestamp,
+                input_config={"calibration": payload.input_config.calibration},
+            )
 
             # 6. Write Zarr output
             logger.info("Job %s: Writing Zarr to %s", job_id, payload.output_destination)
@@ -345,10 +346,23 @@ class InferenceHandler:
             logger.info("Using MockEngine for model=%s", payload.model)
             return MockEngine(model=payload.model)
 
-        # Real engine not implemented yet
+        # Real inference engines — lazy imports to avoid loading E2S in mock mode
+        if payload.model == "medium_range":
+            from atlas_engine import AtlasEngine
+
+            engine = AtlasEngine()
+            engine.load_weights(os.environ.get("EARTH2STUDIO_CACHE"))
+            return engine
+        elif payload.model == "nowcast":
+            from nowcast_engine import NowcastEngine
+
+            engine = NowcastEngine()
+            engine.load_weights(os.environ.get("EARTH2STUDIO_CACHE"))
+            return engine
+
         raise RuntimeError(
-            f"Real inference engine for model={payload.model!r} is not available. "
-            f"Set options.mock_inference=true or MOCK_INFERENCE=true for local development."
+            f"Unknown model: {payload.model!r}. "
+            f"Expected 'medium_range' or 'nowcast'."
         )
 
     @staticmethod

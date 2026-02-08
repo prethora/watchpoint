@@ -357,8 +357,8 @@ class TestInferenceHandlerErrors:
 
     def test_no_mock_no_real_engine_returns_error(self, tmp_path):
         """
-        When mock mode is off and no real engine exists,
-        the handler should return an error.
+        When mock mode is off and real engine dependencies (E2S) are not
+        installed, the handler should return an error from the import failure.
         """
         dest = str(tmp_path / "no_engine")
         payload = _make_mock_payload(dest, mock_inference=False)
@@ -369,7 +369,9 @@ class TestInferenceHandlerErrors:
             handler = InferenceHandler()
             result = handler.run(payload)
             assert result.status == "error"
-            assert "not available" in result.error
+            # Will be either an ImportError (E2S not installed) or
+            # RuntimeError (unknown model)
+            assert result.error is not None
         finally:
             if old_val is not None:
                 os.environ["MOCK_INFERENCE"] = old_val
