@@ -2629,11 +2629,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Running the script generates the report. Removing a flow tag from a known file causes the script to fail.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-08T00:49:21.967091+00:00",
+        "completed_at": "2026-02-08T00:59:02.424261+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
@@ -2746,7 +2746,7 @@
         "skip_reason": null
       }
     ],
-    "status": "unprocessed",
+    "status": "in_progress",
     "phase_completed_at": null,
     "phase_verification": null
   }

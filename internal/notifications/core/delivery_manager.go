@@ -204,6 +204,7 @@ func (m *DeliveryManagerImpl) MarkDeferred(ctx context.Context, deliveryID strin
 // have failed. Returns true if there are no deliveries with a status other
 // than 'failed'. This signals that the compensatory ResetNotificationState
 // action should be taken.
+// Flow: NOTIF-010 (All Channels Failed)
 func (m *DeliveryManagerImpl) CheckAggregateFailure(ctx context.Context, notificationID string) (bool, error) {
 	count, err := m.repo.CountNonFailedDeliveries(ctx, notificationID)
 	if err != nil {

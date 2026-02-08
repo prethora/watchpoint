@@ -12,12 +12,15 @@ Architecture References:
     - flow-simulations.md EVAL-003 (Monitor Mode)
     - flow-simulations.md EVAL-004 (Config Version Mismatch)
     - flow-simulations.md EVAL-005 (First Evaluation Baseline)
+    - flow-simulations.md NOTIF-008 (Escalation)
+    - flow-simulations.md NOTIF-009 (Cleared Notification)
 
 Key Responsibilities:
     - ConfigPolicy (EVAL-004): Detect and handle config version mismatches.
     - Condition Evaluation: Compare forecast values against thresholds.
     - Hysteresis: Apply clear-side buffering to prevent alert flapping.
-    - Escalation Tiers: Calculate escalation level based on overage.
+    - Escalation Tiers (NOTIF-008): Calculate escalation level based on overage.
+    - Clear Notifications (NOTIF-009): Emit THRESHOLD_CLEARED events when conditions clear.
     - First Eval Baseline (EVAL-005): Suppress Monitor Mode on first eval.
     - Trigger Persistence: Store trigger_value for clearance payloads.
     - Test Mode Propagation: Copy WP.test_mode to NotificationEvent.

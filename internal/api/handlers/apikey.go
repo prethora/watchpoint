@@ -518,6 +518,7 @@ func (h *APIKeyHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 // Revoke handles DELETE /v1/api-keys/{id}.
 //
 // Per USER-013 flow simulation:
+// Also used as the primary remediation step for SEC-003 (Key Compromise).
 //  1. Soft-revoke the key (set revoked_at = NOW()).
 //  2. Emit audit event.
 //  3. Return 204 No Content.

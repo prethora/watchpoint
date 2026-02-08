@@ -68,10 +68,12 @@ type DatabaseConfig struct {
 	MinConns          int           `envconfig:"DB_MIN_CONNS" default:"2"`
 	MaxConnLifetime   time.Duration `envconfig:"DB_MAX_CONN_LIFETIME" default:"30m"`
 	AcquireTimeout    time.Duration `envconfig:"DB_ACQUIRE_TIMEOUT" default:"2s"`     // Fail fast when pool exhausted
-	HealthCheckPeriod time.Duration `envconfig:"DB_HEALTH_CHECK_PERIOD" default:"1m"` // Detect dead connections during failover
+	HealthCheckPeriod time.Duration `envconfig:"DB_HEALTH_CHECK_PERIOD" default:"1m"` // Detect dead connections during failover (FAIL-001)
 }
 
 // AWSConfig holds AWS resource identifiers and regional configuration.
+// Region failover (FAIL-013) is a procedural runbook operation; this config
+// determines the active deployment region.
 type AWSConfig struct {
 	Region string `envconfig:"AWS_REGION" default:"us-east-1"`
 

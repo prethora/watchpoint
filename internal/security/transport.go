@@ -1,5 +1,7 @@
 // Package security provides SSRF protection for outbound HTTP requests.
 //
+// Flow: API-002 (SSRF Protection)
+//
 // SafeTransport wraps http.Transport to enforce IP blocklists, preventing
 // the Webhook Worker from reaching internal infrastructure such as AWS
 // metadata service (169.254.169.254), localhost, or private network ranges.

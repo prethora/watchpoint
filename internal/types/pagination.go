@@ -51,7 +51,7 @@ const (
 	AuditActionWatchPointPaused  = "watchpoint.paused"
 	AuditActionWatchPointResumed = "watchpoint.resumed"
 	AuditActionWatchPointDeleted = "watchpoint.deleted"
-	AuditActionWatchPointCloned  = "watchpoint.cloned"
+	AuditActionWatchPointCloned  = "watchpoint.cloned" // WPLC-010
 
 	// Bulk actions - emit AGGREGATED events containing count/filter in metadata.
 	// Do NOT emit individual events per item in bulk operations.

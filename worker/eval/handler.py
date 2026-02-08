@@ -9,6 +9,7 @@ selective SQS retry.
 Architecture References:
     - 07-eval-worker.md Section 6 (Lambda Handler & Execution)
     - flow-simulations.md EVAL-001 (Evaluation Pipeline)
+    - flow-simulations.md EVAL-006 (Queue Backlog Recovery -- manual scaling/purging)
     - flow-simulations.md FAIL-011 (Lambda Function Error / Generic Crash)
     - flow-simulations.md FAIL-008 (Zarr Corruption -> ACK)
 

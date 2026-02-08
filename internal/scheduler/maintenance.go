@@ -529,7 +529,7 @@ func (a *archiverService) ArchiveExpired(ctx context.Context, now time.Time, buf
 }
 
 // -----------------------------------------------------------------------------
-// Tier Transition Service
+// Tier Transition Service (FCST-006: Forecast Cleanup)
 // -----------------------------------------------------------------------------
 
 // TierTransitionDB defines the database operations needed by the TierTransitionService.

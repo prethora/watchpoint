@@ -40,6 +40,7 @@ func (v ValidationResult) IsValid() bool {
 // Validator wraps go-playground/validator to register domain-specific rules.
 // It provides struct-level validation with custom tags for CONUS bounds checking,
 // SSRF-safe URL validation, and IANA timezone validation.
+// Flow: WPLC-012 (Validation Reject)
 type Validator struct {
 	validate *validator.Validate
 	logger   *slog.Logger

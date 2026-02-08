@@ -12,7 +12,7 @@
 //   - Respects a configurable Limit to prevent Lambda timeouts during backfills.
 //   - Injects calibration coefficients into Nowcast inference payloads.
 //
-// Flows: FCST-003, FAIL-005
+// Flows: FCST-002, FCST-003, FAIL-005
 package scheduler
 
 import (

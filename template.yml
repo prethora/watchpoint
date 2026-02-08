@@ -275,6 +275,7 @@ Resources:
   # ---------------------------------------------------------------------------
   # 4.1 Dead Letter Queue (Shared)
   # ---------------------------------------------------------------------------
+  # Flow: OBS-004 (DLQ Alarm -- messages landing here indicate terminal failures)
   DeadLetterQueueShared:
     Type: AWS::SQS::Queue
     Properties:
@@ -707,6 +708,7 @@ Resources:
 
   # ---------------------------------------------------------------------------
   # 7.2 Dead Man's Switch: Nowcast Stale Alarm
+  # Flow: OBS-002
   # ---------------------------------------------------------------------------
   NowcastStaleAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -729,6 +731,7 @@ Resources:
 
   # ---------------------------------------------------------------------------
   # 7.3 Queue Depth: Eval Standard
+  # Flows: OBS-003
   # ---------------------------------------------------------------------------
   EvalQueueDepthAlarm:
     Type: AWS::CloudWatch::Alarm

@@ -22,6 +22,8 @@ const defaultRateLimitMax = 1000
 
 // RateLimit uses a backing store to enforce plan limits.
 //
+// Flow: BILL-009 (API Rate Limit per organization plan)
+//
 // The middleware extracts the OrganizationID from the request context (set by
 // AuthMiddleware) and calls RateLimitStore.IncrementAndCheck to atomically
 // increment the counter and check against the limit.

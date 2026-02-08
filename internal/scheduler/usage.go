@@ -10,7 +10,7 @@
 // its own transaction with SELECT FOR UPDATE to prevent race conditions with
 // concurrent API traffic.
 //
-// Flows: SCHED-001, SCHED-002, VERT-001 (composite key processing)
+// Flows: SCHED-001, SCHED-002, VERT-001, BILL-010 (composite key processing, overage warning)
 package scheduler
 
 import (

@@ -287,6 +287,7 @@ func (h *AuthHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
 // HandleOAuthCallback processes GET /auth/oauth/{provider}/callback requests.
 //
+// Flow: DASH-002 (OAuth Callback)
 // Per USER-007 flow simulation and 05f-api-auth.md Section 8:
 //  1. Extract provider from URL path.
 //  2. Validate state parameter against oauth_state cookie (CSRF protection).
@@ -489,6 +490,7 @@ func (h *AuthHandler) HandleAcceptInvite(w http.ResponseWriter, r *http.Request)
 
 // HandleForgotPassword processes POST /auth/forgot-password requests.
 //
+// Flow: USER-008 (Password Reset)
 // Per 05f-api-auth.md Section 7.1 (Enumeration Protection):
 // Always returns a generic success message regardless of whether the
 // email exists. This prevents email enumeration attacks.

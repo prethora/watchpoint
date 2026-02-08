@@ -131,6 +131,7 @@ type BulkCreateFailure struct {
 }
 
 // BulkResponse for status changes/deletes/tag updates.
+// Flows: BULK-002 (Bulk Pause), BULK-003 (Bulk Resume), BULK-004 (Bulk Delete), BULK-006 (Bulk Clone)
 type BulkResponse struct {
 	SuccessCount int `json:"success_count"`
 	FailureCount int `json:"failure_count"`
@@ -635,9 +636,10 @@ func (h *WatchPointHandler) Pause(w http.ResponseWriter, r *http.Request) {
 
 // Resume handles POST /v1/watchpoints/{id}/resume.
 //
-// Per WPLC-006 flow simulation and 05b-api-watchpoints.md Section 6.4:
+// Per WPLC-006 and WPLC-007 (Resume w/ Backlog) flow simulations and
+// 05b-api-watchpoints.md Section 6.4:
 //  1. State check: verify current status is paused.
-//  2. Cancel deferred deliveries to clear stale backlog.
+//  2. Cancel deferred deliveries to clear stale backlog (WPLC-007).
 //  3. Update status to active.
 //  4. Trigger evaluation via EvalTrigger.
 //  5. Emit audit event.
@@ -820,6 +822,7 @@ func (h *WatchPointHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // BulkCreate handles POST /v1/watchpoints/bulk.
 //
+// Flow: BULK-001 (Bulk Import)
 // Per WPLC-011 flow simulation and 05b-api-watchpoints.md Section 6.5:
 //  1. Validate batch size (max 100).
 //  2. Parallel validation using errgroup with bounded concurrency.
