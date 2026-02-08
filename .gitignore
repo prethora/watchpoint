@@ -6,6 +6,16 @@
 *.dylib
 bin/
 
+# Compiled Go cmd binaries (produced by `go build ./cmd/...`)
+/api
+/archiver
+/batcher
+/bootstrap
+/data-poller
+/email-worker
+/job-runner
+/webhook-worker
+
 # Test artifacts
 *.test
 coverage.out
@@ -55,3 +65,4 @@ venv/
 
 # Scratchpad
 scratchpad/
+accounts.yaml

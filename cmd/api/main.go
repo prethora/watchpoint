@@ -23,6 +23,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-lambda-go/lambda"
+	chiadapter "github.com/awslabs/aws-lambda-go-api-proxy/chi"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -329,9 +331,12 @@ func isLambdaEnvironment() bool {
 }
 
 // runLambda starts the server in AWS Lambda mode using the chi adapter.
+// It bridges API Gateway HTTP API v2 events to the chi router.
 func runLambda(srv *core.Server, logger *slog.Logger) error {
-	logger.Error("Lambda mode is not yet implemented; run with APP_ENV=local for HTTP mode")
-	return fmt.Errorf("lambda mode not yet implemented")
+	logger.Info("starting Lambda handler with chi adapter (HTTP API v2)")
+	adapter := chiadapter.NewV2(srv.Router())
+	lambda.Start(adapter.ProxyWithContextV2)
+	return nil
 }
 
 // runHTTPServer starts the server in standard HTTP mode with graceful shutdown.
