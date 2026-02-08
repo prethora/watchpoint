@@ -23,7 +23,7 @@
 # ---------------------------------------------------------------------------
 # Base: NVIDIA CUDA 12.x Runtime with cuDNN (required for Earth-2 Studio)
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.4.0-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -61,8 +61,11 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3.12 the default python3.
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+# Make python3.12 the default python3 and bootstrap pip for 3.12.
+# The system pip is linked to Ubuntu's Python 3.10 which has distutils;
+# Python 3.12 removed distutils, so we must use ensurepip to get a working pip.
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    python3.12 -m ensurepip --upgrade
 
 # ---------------------------------------------------------------------------
 # Python dependencies
@@ -75,10 +78,29 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 #   - Local simulator deps (fastapi, uvicorn, httpx)
 COPY runpod/requirements.txt /tmp/requirements.txt
 
-# Upgrade pip to a version that supports all needed features, then install deps.
+# Use python3 -m pip to ensure we use the correct pip for Python 3.12.
 # --no-cache-dir: Minimize image size by not caching pip downloads.
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
+#
+# earth2grid has CUDA C++ extensions that require nvcc (only in -devel-
+# images). The runtime image has /usr/local/cuda (detected by torch's
+# cpp_extension.py), so we temporarily hide it during the earth2grid
+# build. WatchPoint uses lat/lon grids not healpix, so the CUDA
+# extensions are not needed.
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
+
+# Step 1: Install torch first (earth2grid needs it as a build dep).
+RUN python3 -m pip install --no-cache-dir "torch>=2.5.0"
+
+# Step 2: Hide /usr/local/cuda entirely so torch cannot find CUDA during
+# earth2grid's extension build. With --no-build-isolation we reuse the
+# torch + setuptools already installed above.
+RUN mv /usr/local/cuda /usr/local/_cuda_hidden && \
+    CUDA_HOME="" python3 -m pip install --no-cache-dir --no-build-isolation \
+    "earth2grid @ git+https://github.com/NVlabs/earth2grid@11dcf1b0787a7eb6a8497a3a5a5e1fdcc31232d3" && \
+    mv /usr/local/_cuda_hidden /usr/local/cuda
+
+# Step 3: Install remaining requirements (torch + earth2grid satisfied).
+RUN python3 -m pip install --no-cache-dir \
     -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 

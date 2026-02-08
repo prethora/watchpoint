@@ -13,6 +13,8 @@ s3fs>=2023.6.0
 pandas>=2.0.0
 
 # ML Inference (Earth-2 Studio)
+# earth2grid is installed separately in the Dockerfile (not on PyPI,
+# requires CUDA to be hidden during build to skip C++ extensions).
 earth2studio[atlas,stormscope]==0.12.1
 scipy>=1.11.0
 
