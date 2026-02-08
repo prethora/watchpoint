@@ -16,6 +16,10 @@ BEGIN
 END
 $$;
 
-GRANT CONNECT ON DATABASE watchpoint TO watchpoint_support_ro;
+DO $$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO watchpoint_support_ro', current_database());
+END
+$$;
 GRANT USAGE ON SCHEMA public TO watchpoint_support_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO watchpoint_support_ro;
