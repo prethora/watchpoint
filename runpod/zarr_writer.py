@@ -374,7 +374,7 @@ class ZarrWriter:
         # Parse s3://bucket/key
         parts = destination.replace("s3://", "").split("/", 1)
         bucket = parts[0]
-        prefix = parts[1] if len(parts) > 1 else ""
+        prefix = (parts[1] if len(parts) > 1 else "").rstrip("/")
         key = f"{prefix}/{SUCCESS_MARKER}" if prefix else SUCCESS_MARKER
 
         s3 = boto3.client("s3")
