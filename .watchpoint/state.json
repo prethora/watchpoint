@@ -2704,11 +2704,11 @@
         ],
         "relevant_flows": [],
         "definition_of_done": "Script passes against a healthy deployment. Fails if an alarm is manually set to error state.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-08T01:19:09.711581+00:00",
+        "completed_at": "2026-02-08T01:23:40.476991+00:00",
+        "satisfaction_iterations": 2,
         "skip_reason": null
       },
       {
