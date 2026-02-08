@@ -202,6 +202,17 @@ func (s *StubRunPodClient) CancelJob(ctx context.Context, externalID string) err
 	return nil
 }
 
+func (s *StubRunPodClient) GetJobStatus(ctx context.Context, jobID string) (*RunPodJobStatus, error) {
+	s.logger.InfoContext(ctx, "stub: GetJobStatus called",
+		"job_id", jobID,
+	)
+	return &RunPodJobStatus{
+		ID:     jobID,
+		Status: "COMPLETED",
+		Output: map[string]any{"status": "success"},
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Interface Compliance
 // ---------------------------------------------------------------------------

@@ -613,6 +613,179 @@ func TestRunPodCancelJob_NotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GetJobStatus Tests - Success Path
+// ---------------------------------------------------------------------------
+
+func TestRunPodGetJobStatus_Success(t *testing.T) {
+	var receivedMethod string
+	var receivedPath string
+	var receivedAuth string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		receivedAuth = r.Header.Get("Authorization")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(RunPodJobStatus{
+			ID:            "runpod_job_abc123",
+			Status:        "COMPLETED",
+			Output:        map[string]any{"status": "success", "output_path": "s3://bucket/path"},
+			ExecutionTime: 42.5,
+		})
+	}))
+	defer server.Close()
+
+	client := newTestRunPodClient(t, server.URL)
+
+	status, err := client.GetJobStatus(context.Background(), "runpod_job_abc123")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if receivedMethod != http.MethodGet {
+		t.Errorf("expected GET, got %s", receivedMethod)
+	}
+
+	expectedPath := "/v2/test_endpoint_123/status/runpod_job_abc123"
+	if receivedPath != expectedPath {
+		t.Errorf("expected path %s, got %s", expectedPath, receivedPath)
+	}
+
+	if receivedAuth != "Bearer test_runpod_api_key" {
+		t.Errorf("expected Bearer test_runpod_api_key, got %s", receivedAuth)
+	}
+
+	if status.ID != "runpod_job_abc123" {
+		t.Errorf("expected ID runpod_job_abc123, got %s", status.ID)
+	}
+	if status.Status != "COMPLETED" {
+		t.Errorf("expected status COMPLETED, got %s", status.Status)
+	}
+	if status.ExecutionTime != 42.5 {
+		t.Errorf("expected execution time 42.5, got %f", status.ExecutionTime)
+	}
+}
+
+func TestRunPodGetJobStatus_InProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(RunPodJobStatus{
+			ID:     "runpod_job_pending",
+			Status: "IN_PROGRESS",
+		})
+	}))
+	defer server.Close()
+
+	client := newTestRunPodClient(t, server.URL)
+
+	status, err := client.GetJobStatus(context.Background(), "runpod_job_pending")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if status.Status != "IN_PROGRESS" {
+		t.Errorf("expected status IN_PROGRESS, got %s", status.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetJobStatus Tests - Error Paths
+// ---------------------------------------------------------------------------
+
+func TestRunPodGetJobStatus_EmptyJobID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called with empty job ID")
+	}))
+	defer server.Close()
+
+	client := newTestRunPodClient(t, server.URL)
+
+	_, err := client.GetJobStatus(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty job ID, got nil")
+	}
+
+	var appErr *types.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected AppError, got %T: %v", err, err)
+	}
+	if appErr.Code != types.ErrCodeValidationMissingField {
+		t.Errorf("expected error code %s, got %s", types.ErrCodeValidationMissingField, appErr.Code)
+	}
+}
+
+func TestRunPodGetJobStatus_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "job not found"}`))
+	}))
+	defer server.Close()
+
+	client := newTestRunPodClient(t, server.URL)
+
+	_, err := client.GetJobStatus(context.Background(), "nonexistent_job")
+	if err == nil {
+		t.Fatal("expected error for 404 response, got nil")
+	}
+
+	var appErr *types.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected AppError, got %T: %v", err, err)
+	}
+	if appErr.Code != types.ErrCodeUpstreamForecast {
+		t.Errorf("expected error code %s, got %s", types.ErrCodeUpstreamForecast, appErr.Code)
+	}
+}
+
+func TestRunPodGetJobStatus_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal server error"}`))
+	}))
+	defer server.Close()
+
+	client := newTestRunPodClient(t, server.URL)
+
+	_, err := client.GetJobStatus(context.Background(), "runpod_job_abc123")
+	if err == nil {
+		t.Fatal("expected error for 500 response, got nil")
+	}
+
+	var appErr *types.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected AppError, got %T: %v", err, err)
+	}
+}
+
+func TestRunPodGetJobStatus_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error": "Invalid API key"}`))
+	}))
+	defer server.Close()
+
+	client := newTestRunPodClient(t, server.URL)
+
+	_, err := client.GetJobStatus(context.Background(), "runpod_job_abc123")
+	if err == nil {
+		t.Fatal("expected error for 401 response, got nil")
+	}
+
+	var appErr *types.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected AppError, got %T: %v", err, err)
+	}
+	if appErr.Code != types.ErrCodeUpstreamForecast {
+		t.Errorf("expected error code %s, got %s", types.ErrCodeUpstreamForecast, appErr.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Stub Tests
 // ---------------------------------------------------------------------------
 
@@ -637,6 +810,21 @@ func TestStubRunPodClient_CancelJob(t *testing.T) {
 	err := stub.CancelJob(context.Background(), "some_job_id")
 	if err != nil {
 		t.Fatalf("expected no error from stub, got: %v", err)
+	}
+}
+
+func TestStubRunPodClient_GetJobStatus(t *testing.T) {
+	stub := NewStubRunPodClient(discardLogger())
+
+	status, err := stub.GetJobStatus(context.Background(), "some_job_id")
+	if err != nil {
+		t.Fatalf("expected no error from stub, got: %v", err)
+	}
+	if status.ID != "some_job_id" {
+		t.Errorf("expected ID some_job_id, got %s", status.ID)
+	}
+	if status.Status != "COMPLETED" {
+		t.Errorf("expected status COMPLETED, got %s", status.Status)
 	}
 }
 

@@ -243,6 +243,62 @@ func (c *RunPodHTTPClient) CancelJob(ctx context.Context, externalID string) err
 	return nil
 }
 
+// GetJobStatus retrieves the current status of a RunPod job.
+// It sends GET to /v2/{endpoint_id}/status/{job_id}.
+func (c *RunPodHTTPClient) GetJobStatus(ctx context.Context, jobID string) (*RunPodJobStatus, error) {
+	if jobID == "" {
+		return nil, types.NewAppError(
+			types.ErrCodeValidationMissingField,
+			"job ID is required for status check",
+			nil,
+		)
+	}
+
+	url := fmt.Sprintf("%s/v2/%s/status/%s", c.baseURL, c.endpointID, jobID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, types.NewAppError(
+			types.ErrCodeInternalUnexpected,
+			"failed to create RunPod status request",
+			err,
+		)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	c.logger.InfoContext(ctx, "checking RunPod job status",
+		"endpoint_id", c.endpointID,
+		"job_id", jobID,
+	)
+
+	resp, err := c.base.Do(req)
+	if err != nil {
+		return nil, c.wrapError("GetJobStatus", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, c.handleErrorResponse(resp, "GetJobStatus")
+	}
+
+	var status RunPodJobStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, types.NewAppError(
+			types.ErrCodeInternalUnexpected,
+			"failed to decode RunPod status response",
+			err,
+		)
+	}
+
+	c.logger.InfoContext(ctx, "RunPod job status retrieved",
+		"job_id", status.ID,
+		"status", status.Status,
+	)
+
+	return &status, nil
+}
+
 // handleErrorResponse reads and logs the error body from a non-2xx response,
 // then returns an appropriate AppError.
 func (c *RunPodHTTPClient) handleErrorResponse(resp *http.Response, operation string) *types.AppError {

@@ -99,4 +99,17 @@ type RunPodClient interface {
 	// CancelJob terminates a running job on the external provider.
 	// Used by reconciliation to stop hanging jobs and prevent cost accumulation.
 	CancelJob(ctx context.Context, externalID string) error
+
+	// GetJobStatus retrieves the current status of a RunPod job.
+	// Used for polling job completion in test tooling and operational scripts.
+	GetJobStatus(ctx context.Context, jobID string) (*RunPodJobStatus, error)
+}
+
+// RunPodJobStatus represents the status of a RunPod serverless job.
+type RunPodJobStatus struct {
+	ID            string         `json:"id"`
+	Status        string         `json:"status"` // IN_QUEUE, IN_PROGRESS, COMPLETED, FAILED, CANCELLED, TIMED_OUT
+	Output        map[string]any `json:"output,omitempty"`
+	Error         string         `json:"error,omitempty"`
+	ExecutionTime float64        `json:"executionTime,omitempty"`
 }
