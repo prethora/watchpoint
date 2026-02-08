@@ -202,8 +202,8 @@ func TestValidateTags(t *testing.T) {
 		wantTag    string
 	}{
 		{reflect.TypeOf(Config{}), "Environment", "required,oneof=local dev staging prod"},
-		{reflect.TypeOf(ServerConfig{}), "APIExternalURL", "required,url"},
-		{reflect.TypeOf(ServerConfig{}), "DashboardURL", "required,url"},
+		{reflect.TypeOf(ServerConfig{}), "APIExternalURL", "omitempty,url"},
+		{reflect.TypeOf(ServerConfig{}), "DashboardURL", "omitempty,url"},
 		{reflect.TypeOf(DatabaseConfig{}), "URL", "required,url"},
 		{reflect.TypeOf(AWSConfig{}), "ForecastBucket", "required"},
 		{reflect.TypeOf(AWSConfig{}), "EvalQueueUrgent", "required,url"},

@@ -62,7 +62,15 @@ Parameters:
     Description: >
       Public API URL for OAuth callbacks and email links.
       When using a custom domain, leave empty to auto-resolve from DomainName.
-      For default API Gateway URLs, set this after initial deployment.
+      When empty and no custom domain, auto-resolves from the HttpApi resource.
+
+  DashboardUrl:
+    Type: String
+    Default: ""
+    Description: >
+      Front-end dashboard URL used in email templates and OAuth redirects.
+      Set to the deployed dashboard URL (e.g., https://app.watchpoint.io).
+      Defaults to the API URL when empty (suitable for dev).
 
 # =============================================================================
 # Conditions
@@ -71,6 +79,7 @@ Conditions:
   HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
   HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
   HasApiExternalUrl: !Not [!Equals [!Ref ApiExternalUrl, ""]]
+  HasDashboardUrl: !Not [!Equals [!Ref DashboardUrl, ""]]
 
 # =============================================================================
 # Globals
@@ -94,12 +103,23 @@ Globals:
         AWS_ENDPOINT_URL: !Ref AwsEndpointUrl
 
         # --- Service Discovery ---
-        # Resolved from: ApiExternalUrl parameter > custom domain > empty (set post-deploy).
-        # After initial deployment, the API Gateway URL is available in stack outputs
-        # and should be set via ApiExternalUrl parameter on subsequent deploys.
+        # Resolved from: ApiExternalUrl parameter > custom domain > empty.
+        # On first deploy, API_EXTERNAL_URL will be empty. The generate-sam-config.sh
+        # script auto-detects the deployed URL from stack outputs on subsequent deploys.
         API_EXTERNAL_URL: !If
           - HasApiExternalUrl
           - !Ref ApiExternalUrl
+          - !If
+            - HasCustomDomain
+            - !Sub "https://${DomainName}"
+            - ""
+
+        # Dashboard URL for email templates and OAuth redirects.
+        # Falls back to the API URL when explicitly set, otherwise empty.
+        # Auto-populated by generate-sam-config.sh on subsequent deploys.
+        DASHBOARD_URL: !If
+          - HasDashboardUrl
+          - !Ref DashboardUrl
           - !If
             - HasCustomDomain
             - !Sub "https://${DomainName}"

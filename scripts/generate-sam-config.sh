@@ -159,6 +159,41 @@ validate_ecr_repository() {
 }
 
 # ---------------------------------------------------------------------------
+# Auto-detect API URL from existing stack outputs (for re-deploys)
+# ---------------------------------------------------------------------------
+# If API_EXTERNAL_URL is not explicitly set, try to read it from an existing
+# CloudFormation stack's outputs. This makes re-deploys seamless — the URL
+# from the first deploy is automatically carried forward.
+auto_detect_api_url() {
+    local stack_name="watchpoint-${1:-dev}"
+
+    if [[ -n "${API_EXTERNAL_URL}" ]]; then
+        return  # Explicitly set, no auto-detection needed
+    fi
+
+    info "API_EXTERNAL_URL not set. Checking existing stack '${stack_name}' for ApiEndpoint..."
+
+    local api_url
+    if api_url=$(aws cloudformation describe-stacks \
+        --stack-name "${stack_name}" \
+        --region "${REGION}" \
+        --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" \
+        --output text 2>/dev/null) && [[ -n "${api_url}" && "${api_url}" != "None" ]]; then
+        API_EXTERNAL_URL="${api_url}"
+        ok "Auto-detected API_EXTERNAL_URL from stack output: ${API_EXTERNAL_URL}"
+    else
+        warn "No existing stack found. API_EXTERNAL_URL will be empty on first deploy."
+        warn "Run generate-sam-config.sh again after the first deploy to auto-populate."
+    fi
+
+    # Default DASHBOARD_URL to API_EXTERNAL_URL if not set
+    if [[ -z "${DASHBOARD_URL}" && -n "${API_EXTERNAL_URL}" ]]; then
+        DASHBOARD_URL="${API_EXTERNAL_URL}"
+        ok "Auto-detected DASHBOARD_URL from API_EXTERNAL_URL: ${DASHBOARD_URL}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Resolve configuration values from environment with defaults
 # ---------------------------------------------------------------------------
 resolve_config() {
@@ -170,6 +205,7 @@ resolve_config() {
     GITHUB_CLIENT_ID="${GITHUB_CLIENT_ID:-}"
     CORS_ORIGINS="${CORS_ORIGINS:-*}"
     API_EXTERNAL_URL="${API_EXTERNAL_URL:-}"
+    DASHBOARD_URL="${DASHBOARD_URL:-}"
     OUTPUT_FILE="${OUTPUT_FILE:-${PROJECT_ROOT}/samconfig.toml}"
 
     if [[ -z "${ALERT_EMAIL}" ]]; then
@@ -242,6 +278,10 @@ generate_env_section() {
 
     if [[ -n "${API_EXTERNAL_URL}" ]]; then
         param_overrides="${param_overrides} ApiExternalUrl=${API_EXTERNAL_URL}"
+    fi
+
+    if [[ -n "${DASHBOARD_URL}" ]]; then
+        param_overrides="${param_overrides} DashboardUrl=${DASHBOARD_URL}"
     fi
 
     # Write the TOML section
@@ -387,6 +427,7 @@ main() {
     validate_artifact_bucket
     validate_ecr_repository
     resolve_config
+    auto_detect_api_url "${ENV:-dev}"
     generate_samconfig
     verify_output
     display_summary

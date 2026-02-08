@@ -52,9 +52,10 @@ type Config struct {
 // ServerConfig holds HTTP server and public URL configuration.
 type ServerConfig struct {
 	Port string `envconfig:"PORT" default:"8080"`
-	// Public URLs for redirects and emails (no trailing slash)
-	APIExternalURL string `envconfig:"API_EXTERNAL_URL" validate:"required,url"` // e.g., https://api.watchpoint.io
-	DashboardURL   string `envconfig:"DASHBOARD_URL" validate:"required,url"`    // e.g., https://app.watchpoint.io
+	// Public URLs for redirects and emails (no trailing slash).
+	// Optional on first deploy; auto-populated by generate-sam-config.sh on re-deploys.
+	APIExternalURL string `envconfig:"API_EXTERNAL_URL" validate:"omitempty,url"` // e.g., https://api.watchpoint.io
+	DashboardURL   string `envconfig:"DASHBOARD_URL" validate:"omitempty,url"`    // e.g., https://app.watchpoint.io
 }
 
 // DatabaseConfig holds database connection and pool tuning parameters.
