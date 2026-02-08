@@ -396,3 +396,32 @@ class InferenceHandler:
         except Exception as exc:
             logger.debug("_SUCCESS marker check failed for %s: %s", destination, exc)
             return False
+
+
+# ---------------------------------------------------------------------------
+# RunPod Serverless SDK entry point
+# ---------------------------------------------------------------------------
+
+def _runpod_handler(job: dict) -> dict:
+    """RunPod serverless handler entry point.
+
+    Called by the RunPod SDK for each incoming job. The job dict has the form:
+    {"id": "...", "input": {"model": "...", ...}}
+
+    parse_payload() inside InferenceHandler.run() does raw.get("input", raw)
+    to unwrap the RunPod envelope, so the full job dict works directly.
+    """
+    handler = InferenceHandler()
+    result = handler.run(job)
+    return result.to_dict()
+
+
+if __name__ == "__main__":
+    import runpod
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logger.info("Starting RunPod serverless worker...")
+    runpod.serverless.start({"handler": _runpod_handler})
