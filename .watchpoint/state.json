@@ -2687,11 +2687,11 @@
           "OBS-002"
         ],
         "definition_of_done": "Running the script results in the CloudWatch Alarm state transitioning from `INSUFFICIENT_DATA` or `ALARM` to `OK` within 2 minutes.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-08T01:15:49.615360+00:00",
+        "completed_at": "2026-02-08T01:18:53.403661+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
