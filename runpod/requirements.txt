@@ -7,7 +7,7 @@ runpod>=1.6.0
 # Data Science Stack (shared with eval worker)
 numpy>=1.24.0
 xarray>=2023.0.0
-zarr>=2.16.0
+zarr>=2.16.0,<3.0.0
 numcodecs>=0.11.0
 s3fs>=2023.6.0
 pandas>=2.0.0
