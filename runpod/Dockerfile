@@ -4,7 +4,7 @@
 # Builds the Python-based GPU inference worker for RunPod Serverless.
 #
 # Architecture: linux/amd64 (NVIDIA GPU instances)
-# Base image:   nvidia/cuda:12.4.0-cudnn-runtime-ubuntu22.04
+# Base image:   nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 # Entrypoint:   handler.py (RunPod Serverless handler)
 #
 # Build context: Project root (.)
@@ -21,9 +21,11 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Base: NVIDIA CUDA 12.x Runtime with cuDNN (required for Earth-2 Studio)
+# Base: NVIDIA CUDA 12.x Devel with cuDNN (required for Earth-2 Studio)
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+# Must use -devel- (not -runtime-) because NATTEN (Atlas dependency) compiles
+# CUDA kernels during pip install and needs nvcc from the CUDA toolkit.
+FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -32,10 +34,12 @@ FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 # DEBIAN_FRONTEND: Suppress interactive prompts during apt-get.
 # MODEL_WEIGHTS_PATH: Default network volume mount point for model weights.
 # EARTH2STUDIO_CACHE: Cache directory for E2S model weights (auto-download).
+# TORCH_CUDA_ARCH_LIST: Compile NATTEN kernels for A100 (8.0) and H100 (9.0).
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     MODEL_WEIGHTS_PATH="/runpod-volume/weights" \
-    EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio"
+    EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio" \
+    TORCH_CUDA_ARCH_LIST="8.0;9.0"
 
 # ---------------------------------------------------------------------------
 # System dependencies
