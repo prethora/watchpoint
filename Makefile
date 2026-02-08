@@ -1,5 +1,5 @@
 .PHONY: test build clean migrate-up migrate-down migrate-cloud mocks lint-python run-job run-stack stop-stack \
-       build-lambda build-images build-all deploy-cloud \
+       build-lambda build-images build-all deploy-cloud audit-security \
        build-ApiFunction build-BatcherFunction build-DataPollerFunction \
        build-ArchiverFunction build-EmailWorkerFunction build-WebhookWorkerFunction
 
@@ -105,6 +105,49 @@ mocks:
 lint-python:
 	black --check worker/ runpod/
 	mypy worker/ runpod/ --ignore-missing-imports
+
+# ---------------------------------------------------------------------------
+# Security audit: static analysis for Go and Python code
+# ---------------------------------------------------------------------------
+# Runs gosec (Go) and bandit (Python) via Docker containers to generate
+# JSON compliance reports. No local tool installation required.
+#
+# Usage:
+#   make audit-security
+#
+# Output:
+#   reports/security-go.json      — gosec findings for Go code
+#   reports/security-python.json  — bandit findings for Python code
+#
+# Exit behavior:
+#   The target always generates reports, even if findings are present.
+#   gosec and bandit exit non-zero when they find issues, so we allow
+#   those exits and only fail if the tools themselves cannot run.
+audit-security:
+	@mkdir -p reports
+	@echo "=== Security Audit ==="
+	@echo ""
+	@echo "[1/2] Running gosec (Go static security analysis)..."
+	@docker run --rm \
+		-v $(PWD):/src \
+		-w /src \
+		securego/gosec:latest \
+		-fmt=json -out=/src/reports/security-go.json -stdout ./... \
+		|| true
+	@echo "      -> reports/security-go.json"
+	@echo ""
+	@echo "[2/2] Running bandit (Python static security analysis)..."
+	@docker run --rm \
+		-v $(PWD):/src \
+		-w /src \
+		--entrypoint "" \
+		python:3.12-slim \
+		sh -c "pip install --quiet bandit && bandit -f json -o /src/reports/security-python.json -r worker/ runpod/ -x worker/.venv,worker/__pycache__,worker/.pytest_cache,worker/.mypy_cache,runpod/.venv,runpod/__pycache__,runpod/.pytest_cache || true"
+	@echo "      -> reports/security-python.json"
+	@echo ""
+	@echo "=== Security audit complete. Reports in reports/ ==="
+	@test -f reports/security-go.json || (echo "ERROR: reports/security-go.json was not generated" && exit 1)
+	@test -f reports/security-python.json || (echo "ERROR: reports/security-python.json was not generated" && exit 1)
 
 # Run a maintenance job locally, bypassing Lambda.
 # Usage: make run-job TASK=aggregate_usage

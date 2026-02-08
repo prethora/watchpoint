@@ -2648,11 +2648,11 @@
           "SEC-005"
         ],
         "definition_of_done": "`make audit-security` passes and generates JSON reports in the `reports/` directory.",
-        "status": "unprocessed",
+        "status": "complete",
         "reports": [],
-        "started_at": null,
-        "completed_at": null,
-        "satisfaction_iterations": null,
+        "started_at": "2026-02-08T00:59:28.506236+00:00",
+        "completed_at": "2026-02-08T01:11:43.776672+00:00",
+        "satisfaction_iterations": 1,
         "skip_reason": null
       },
       {
