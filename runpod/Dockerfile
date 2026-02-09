@@ -4,7 +4,7 @@
 # Builds the Python-based GPU inference worker for RunPod Serverless.
 #
 # Architecture: linux/amd64 (NVIDIA GPU instances)
-# Base image:   nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+# Base image:   nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 # Entrypoint:   handler.py (RunPod Serverless handler)
 #
 # Build context: Project root (.)
@@ -14,6 +14,10 @@
 # Earth-2 Studio on first inference and cached at EARTH2STUDIO_CACHE on the
 # persistent RunPod Network Volume.
 #
+# NATTEN strategy: Pre-built CUDA wheels from whl.natten.org require
+# PyTorch 2.9+ and CUDA 12.6+. This avoids compiling libnatten from source
+# (which takes hours on low-memory machines and requires a devel image).
+#
 # References:
 #   - 11-runpod.md Section 6.1 (Docker Specification)
 #   - 11-runpod.md Section 6.2 (Model Weights Storage)
@@ -21,38 +25,23 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Base: NVIDIA CUDA 12.x Devel with cuDNN (required for Earth-2 Studio)
+# Base: NVIDIA CUDA 12.6 Runtime with cuDNN
 # ---------------------------------------------------------------------------
-# Must use -devel- (not -runtime-) because NATTEN (Atlas dependency) compiles
-# CUDA kernels during pip install and needs nvcc from the CUDA toolkit.
-FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+# Using runtime (not devel) since we install NATTEN from pre-built CUDA wheels
+# instead of compiling from source. Smaller image, faster builds.
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
 
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
-# PYTHONUNBUFFERED: Ensure real-time log output in RunPod console.
-# DEBIAN_FRONTEND: Suppress interactive prompts during apt-get.
-# MODEL_WEIGHTS_PATH: Default network volume mount point for model weights.
-# EARTH2STUDIO_CACHE: Cache directory for E2S model weights (auto-download).
-# NATTEN_CUDA_ARCH: NATTEN's own env var to compile libnatten CUDA kernels.
-# TORCH_CUDA_ARCH_LIST: Standard PyTorch CUDA arch list (used by other extensions).
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     MODEL_WEIGHTS_PATH="/runpod-volume/weights" \
-    EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio" \
-    NATTEN_CUDA_ARCH="8.0;9.0" \
-    TORCH_CUDA_ARCH_LIST="8.0;9.0"
+    EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio"
 
 # ---------------------------------------------------------------------------
 # System dependencies
 # ---------------------------------------------------------------------------
-# python3.12: Runtime interpreter (E2S recommendation).
-# python3-pip: Package installer for Python dependencies.
-# python3.12-venv: Required for pip to function correctly on Ubuntu 22.04.
-# build-essential: Required for natten compilation (Atlas dependency).
-# cmake, ninja-build: Required by NATTEN to compile libnatten CUDA kernels.
-# git: Needed by some Python packages that install from git repos.
-# Clean up apt caches to minimize layer size.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         software-properties-common \
@@ -64,15 +53,11 @@ RUN apt-get update && \
         python3-pip \
         python3.12-venv \
         build-essential \
-        cmake \
-        ninja-build \
         git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3.12 the default python3 and bootstrap pip for 3.12.
-# The system pip is linked to Ubuntu's Python 3.10 which has distutils;
-# Python 3.12 removed distutils, so we must use ensurepip to get a working pip.
+# Make python3.12 the default and bootstrap pip.
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python && \
     python3.12 -m ensurepip --upgrade
@@ -80,49 +65,34 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 # ---------------------------------------------------------------------------
 # Python dependencies
 # ---------------------------------------------------------------------------
-# Copy requirements first to leverage Docker layer caching.
-# runpod/requirements.txt contains all needed dependencies:
-#   - RunPod SDK, data science stack (numpy, xarray, zarr, s3fs, pandas)
-#   - ML inference (earth2studio[atlas,stormscope], scipy)
-#   - Infrastructure (boto3, pydantic)
-#   - Local simulator deps (fastapi, uvicorn, httpx)
 COPY runpod/requirements.txt /tmp/requirements.txt
 
-# Use python3 -m pip to ensure we use the correct pip for Python 3.12.
-# --no-cache-dir: Minimize image size by not caching pip downloads.
-#
-# earth2grid has CUDA C++ extensions that require nvcc (only in -devel-
-# images). The runtime image has /usr/local/cuda (detected by torch's
-# cpp_extension.py), so we temporarily hide it during the earth2grid
-# build. WatchPoint uses lat/lon grids not healpix, so the CUDA
-# extensions are not needed.
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
 
-# Step 1: Install torch first (earth2grid needs it as a build dep).
-RUN python3 -m pip install --no-cache-dir "torch>=2.5.0"
+# Step 1: Install PyTorch 2.9 with CUDA 12.6 support.
+# We need torch 2.9+ for NATTEN pre-built CUDA wheels.
+RUN python3 -m pip install --no-cache-dir "torch>=2.9.0,<2.10.0"
 
-# Step 2: Hide /usr/local/cuda entirely so torch cannot find CUDA during
-# earth2grid's extension build. With --no-build-isolation we reuse the
-# torch + setuptools already installed above.
+# Step 2: Install earth2grid (hide CUDA to skip unnecessary C++ extensions).
 RUN mv /usr/local/cuda /usr/local/_cuda_hidden && \
     CUDA_HOME="" python3 -m pip install --no-cache-dir --no-build-isolation \
     "earth2grid @ git+https://github.com/NVlabs/earth2grid@11dcf1b0787a7eb6a8497a3a5a5e1fdcc31232d3" && \
     mv /usr/local/_cuda_hidden /usr/local/cuda
 
-# Step 3: Install remaining requirements (torch + earth2grid satisfied).
-# --no-binary natten forces NATTEN to compile from source instead of using a
-# CPU-only PyPI wheel. NATTEN_CUDA_ARCH (set in ENV above) tells NATTEN's
-# build system to compile libnatten with CUDA kernels for A100/H100.
-# cmake and ninja-build (installed above) are required for the libnatten build.
-RUN python3 -m pip install --no-cache-dir --no-binary natten \
+# Step 3: Install NATTEN from pre-built CUDA wheel (includes libnatten).
+# These wheels have compiled CUDA kernels for CUTLASS FNA — no source build needed.
+# See: https://github.com/SHI-Labs/NATTEN/blob/main/docs/install.md
+RUN python3 -m pip install --no-cache-dir \
+    "natten==0.21.5+torch290cu126" -f https://whl.natten.org
+
+# Step 4: Install remaining requirements (torch + earth2grid + natten satisfied).
+RUN python3 -m pip install --no-cache-dir \
     -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
 # ---------------------------------------------------------------------------
 # Application code
 # ---------------------------------------------------------------------------
-# Copy only production Python files (exclude tests, caches, venvs).
-# The .dockerignore already filters __pycache__, .venv, .pytest_cache, etc.
 COPY runpod/__init__.py /app/__init__.py
 COPY runpod/handler.py /app/handler.py
 COPY runpod/mock_engine.py /app/mock_engine.py
@@ -138,6 +108,4 @@ WORKDIR /app
 # ---------------------------------------------------------------------------
 # Entrypoint: RunPod Serverless handler
 # ---------------------------------------------------------------------------
-# Matches 11-runpod.md Section 6.1.
-# The -u flag ensures unbuffered stdout/stderr for real-time log streaming.
 CMD [ "python3", "-u", "handler.py" ]
