@@ -74,6 +74,7 @@ RUN apt-get update && \
 # The system pip is linked to Ubuntu's Python 3.10 which has distutils;
 # Python 3.12 removed distutils, so we must use ensurepip to get a working pip.
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python && \
     python3.12 -m ensurepip --upgrade
 
 # ---------------------------------------------------------------------------
