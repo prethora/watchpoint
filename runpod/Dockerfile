@@ -34,11 +34,13 @@ FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 # DEBIAN_FRONTEND: Suppress interactive prompts during apt-get.
 # MODEL_WEIGHTS_PATH: Default network volume mount point for model weights.
 # EARTH2STUDIO_CACHE: Cache directory for E2S model weights (auto-download).
-# TORCH_CUDA_ARCH_LIST: Compile NATTEN kernels for A100 (8.0) and H100 (9.0).
+# NATTEN_CUDA_ARCH: NATTEN's own env var to compile libnatten CUDA kernels.
+# TORCH_CUDA_ARCH_LIST: Standard PyTorch CUDA arch list (used by other extensions).
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
     MODEL_WEIGHTS_PATH="/runpod-volume/weights" \
     EARTH2STUDIO_CACHE="/runpod-volume/weights/earth2studio" \
+    NATTEN_CUDA_ARCH="8.0;9.0" \
     TORCH_CUDA_ARCH_LIST="8.0;9.0"
 
 # ---------------------------------------------------------------------------
@@ -48,6 +50,7 @@ ENV PYTHONUNBUFFERED=1 \
 # python3-pip: Package installer for Python dependencies.
 # python3.12-venv: Required for pip to function correctly on Ubuntu 22.04.
 # build-essential: Required for natten compilation (Atlas dependency).
+# cmake, ninja-build: Required by NATTEN to compile libnatten CUDA kernels.
 # git: Needed by some Python packages that install from git repos.
 # Clean up apt caches to minimize layer size.
 RUN apt-get update && \
@@ -61,6 +64,8 @@ RUN apt-get update && \
         python3-pip \
         python3.12-venv \
         build-essential \
+        cmake \
+        ninja-build \
         git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -104,9 +109,10 @@ RUN mv /usr/local/cuda /usr/local/_cuda_hidden && \
     mv /usr/local/_cuda_hidden /usr/local/cuda
 
 # Step 3: Install remaining requirements (torch + earth2grid satisfied).
-# --no-binary natten forces NATTEN to compile from source using nvcc instead
-# of downloading a CPU-only wheel from PyPI. This produces CUDA kernels for
-# the architectures listed in TORCH_CUDA_ARCH_LIST (set in ENV above).
+# --no-binary natten forces NATTEN to compile from source instead of using a
+# CPU-only PyPI wheel. NATTEN_CUDA_ARCH (set in ENV above) tells NATTEN's
+# build system to compile libnatten with CUDA kernels for A100/H100.
+# cmake and ninja-build (installed above) are required for the libnatten build.
 RUN python3 -m pip install --no-cache-dir --no-binary natten \
     -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
