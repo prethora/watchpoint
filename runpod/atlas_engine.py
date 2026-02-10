@@ -70,9 +70,21 @@ class AtlasEngine(ModelEngine):
         self._model = Atlas.load_model(package)
         logger.info("Atlas model loaded successfully")
 
-        self._apply_optimizations()
+        # Optimizations are toggleable via ATLAS_OPTIMIZATIONS env var:
+        #   "all"  — TF32 + bf16 + EM sampler (default)
+        #   "tf32" — TF32 only
+        #   "none" — vanilla earth2studio, no modifications
+        opt_mode = os.environ.get("ATLAS_OPTIMIZATIONS", "all")
+        logger.info("ATLAS_OPTIMIZATIONS=%s", opt_mode)
 
-    def _apply_optimizations(self) -> None:
+        if opt_mode != "none":
+            self._apply_optimizations(opt_mode)
+
+        # Always install the monitoring hook regardless of optimization mode
+        self._install_step_monitor_hook()
+        logger.info("Step monitor hook installed (timing + memory logging)")
+
+    def _apply_optimizations(self, mode: str = "all") -> None:
         """
         Apply GPU performance optimizations to the loaded Atlas model.
 
@@ -83,15 +95,22 @@ class AtlasEngine(ModelEngine):
         2. bf16 autocast: Wrap model + autoencoder forward in bfloat16 autocast.
         3. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2.
 
-        Plus a monitoring hook that logs per-step timing and GPU memory stats.
+        Modes:
+          "all"  — TF32 + bf16 autocast + EM sampler
+          "tf32" — TF32 only (test if bf16/EM are hurting)
+
         Note: torch.cuda.empty_cache() was tested but destroys the CUDA caching
         allocator's memory pool, causing 2-5x slowdown per step.
         """
-        # 1. Enable TF32 matmul precision (1.85x speedup)
+        # 1. Enable TF32 matmul precision (always, in any optimization mode)
         torch.set_float32_matmul_precision("high")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         logger.info("TF32 matmul enabled")
+
+        if mode == "tf32":
+            logger.info("TF32-only mode — skipping bf16 and EM sampler")
+            return
 
         # 2. bf16 autocast on model (SInterpolantLatentDiT) + autoencoder (NattenCombineDiT)
         _orig_model_fwd = self._model.model.forward
@@ -115,10 +134,6 @@ class AtlasEngine(ModelEngine):
         self._model.sinterpolant.sample_step = self._model.sinterpolant.em_step
         self._model.sinterpolant_sample_steps = 100
         logger.info("EM sampler enabled (100 sample steps)")
-
-        # 4. Install monitoring hook for per-step timing and memory stats
-        self._install_step_monitor_hook()
-        logger.info("Step monitor hook installed (timing + memory logging)")
 
     def _install_step_monitor_hook(self) -> None:
         """
