@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch._dynamo
 import xarray as xr
 
 from mock_engine import ModelEngine
@@ -71,9 +72,10 @@ class AtlasEngine(ModelEngine):
         logger.info("Atlas model loaded successfully")
 
         # Optimizations are toggleable via ATLAS_OPTIMIZATIONS env var:
-        #   "all"  — TF32 + bf16 + EM sampler (default)
-        #   "tf32" — TF32 only
-        #   "none" — vanilla earth2studio, no modifications
+        #   "all"         — TF32 + bf16 + EM sampler (default)
+        #   "all_compile" — TF32 + bf16 + EM + torch.compile with periodic dynamo reset
+        #   "tf32"        — TF32 only
+        #   "none"        — vanilla earth2studio, no modifications
         opt_mode = os.environ.get("ATLAS_OPTIMIZATIONS", "all")
         logger.info("ATLAS_OPTIMIZATIONS=%s", opt_mode)
 
@@ -81,7 +83,9 @@ class AtlasEngine(ModelEngine):
             self._apply_optimizations(opt_mode)
 
         # Always install the monitoring hook regardless of optimization mode
-        self._install_step_monitor_hook()
+        self._install_step_monitor_hook(
+            dynamo_reset_interval=10 if opt_mode == "all_compile" else 0,
+        )
         logger.info("Step monitor hook installed (timing + memory logging)")
 
     def _apply_optimizations(self, mode: str = "all") -> None:
@@ -96,8 +100,9 @@ class AtlasEngine(ModelEngine):
         3. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2.
 
         Modes:
-          "all"  — TF32 + bf16 autocast + EM sampler
-          "tf32" — TF32 only (test if bf16/EM are hurting)
+          "all"         — TF32 + bf16 autocast + EM sampler
+          "all_compile" — all + torch.compile DiT blocks (with periodic dynamo reset)
+          "tf32"        — TF32 only (test if bf16/EM are hurting)
 
         Note: torch.cuda.empty_cache() was tested but destroys the CUDA caching
         allocator's memory pool, causing 2-5x slowdown per step.
@@ -135,11 +140,49 @@ class AtlasEngine(ModelEngine):
         self._model.sinterpolant_sample_steps = 100
         logger.info("EM sampler enabled (100 sample steps)")
 
-    def _install_step_monitor_hook(self) -> None:
+        # 4. torch.compile DiT blocks (all_compile mode only)
+        if mode == "all_compile":
+            self._apply_torch_compile()
+
+    def _apply_torch_compile(self) -> None:
+        """
+        Apply torch.compile to DiT blocks for kernel fusion speedup.
+
+        Used with periodic dynamo reset (in the monitor hook) to prevent
+        cache accumulation that caused progressive slowdown in earlier tests.
+        """
+        torch._dynamo.config.suppress_errors = True
+        num_blocks = len(self._model.model.blocks)
+        self._compiled_block_originals = []
+        for i in range(num_blocks):
+            self._compiled_block_originals.append(self._model.model.blocks[i])
+            self._model.model.blocks[i] = torch.compile(
+                self._model.model.blocks[i], mode="default", fullgraph=False,
+            )
+        logger.info("torch.compile applied to %d DiT blocks", num_blocks)
+
+    def _recompile_blocks(self) -> None:
+        """Re-compile DiT blocks from originals after a dynamo reset."""
+        if not hasattr(self, "_compiled_block_originals"):
+            return
+        for i, orig in enumerate(self._compiled_block_originals):
+            self._model.model.blocks[i] = torch.compile(
+                orig, mode="default", fullgraph=False,
+            )
+        logger.info("Re-compiled %d DiT blocks after dynamo reset",
+                     len(self._compiled_block_originals))
+
+    def _install_step_monitor_hook(self, dynamo_reset_interval: int = 0) -> None:
         """
         Install a front_hook on the Atlas model that logs per-step timing and
-        GPU memory stats. No cleanup — torch.cuda.empty_cache() destroys the
-        CUDA caching allocator's memory pool and causes massive slowdowns.
+        GPU memory stats.
+
+        Parameters
+        ----------
+        dynamo_reset_interval : int
+            If > 0, call torch._dynamo.reset() every N steps to prevent
+            dynamo cache accumulation, then re-compile the DiT blocks.
+            Set to 0 to disable (default).
         """
         self._step_timer = time.monotonic()
         self._step_count = 0
@@ -159,6 +202,15 @@ class AtlasEngine(ModelEngine):
                 "Step %d | %.1fs | GPU: %.2f GB alloc, %.2f GB reserved",
                 self._step_count, elapsed, mem_alloc, mem_reserved,
             )
+
+            # Periodic dynamo reset to prevent cache accumulation
+            if (dynamo_reset_interval > 0
+                    and self._step_count > 1
+                    and self._step_count % dynamo_reset_interval == 0):
+                logger.info("Resetting torch._dynamo cache (every %d steps)",
+                            dynamo_reset_interval)
+                torch._dynamo.reset()
+                self._recompile_blocks()
 
             return _orig_front_hook(x, coords)
 
