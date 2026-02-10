@@ -16,7 +16,6 @@ References:
 
 from __future__ import annotations
 
-import gc
 import logging
 import os
 import time
@@ -84,9 +83,9 @@ class AtlasEngine(ModelEngine):
         2. bf16 autocast: Wrap model + autoencoder forward in bfloat16 autocast.
         3. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2.
 
-        Plus a cleanup hook that runs gc.collect() + torch.cuda.empty_cache()
-        between steps to prevent CUDA memory fragmentation, with per-step
-        timing and memory logging.
+        Plus a monitoring hook that logs per-step timing and GPU memory stats.
+        Note: torch.cuda.empty_cache() was tested but destroys the CUDA caching
+        allocator's memory pool, causing 2-5x slowdown per step.
         """
         # 1. Enable TF32 matmul precision (1.85x speedup)
         torch.set_float32_matmul_precision("high")
@@ -117,23 +116,22 @@ class AtlasEngine(ModelEngine):
         self._model.sinterpolant_sample_steps = 100
         logger.info("EM sampler enabled (100 sample steps)")
 
-        # 4. Install cleanup hook between forecast steps
-        self._install_step_cleanup_hook()
-        logger.info("Step cleanup hook installed (gc + empty_cache between steps)")
+        # 4. Install monitoring hook for per-step timing and memory stats
+        self._install_step_monitor_hook()
+        logger.info("Step monitor hook installed (timing + memory logging)")
 
-    def _install_step_cleanup_hook(self) -> None:
+    def _install_step_monitor_hook(self) -> None:
         """
-        Install a front_hook on the Atlas model that runs between forecast steps.
-
-        Performs gc.collect() + torch.cuda.empty_cache() to prevent CUDA memory
-        fragmentation, and logs per-step timing and GPU memory stats.
+        Install a front_hook on the Atlas model that logs per-step timing and
+        GPU memory stats. No cleanup — torch.cuda.empty_cache() destroys the
+        CUDA caching allocator's memory pool and causes massive slowdowns.
         """
         self._step_timer = time.monotonic()
         self._step_count = 0
 
         _orig_front_hook = self._model.front_hook
 
-        def _cleanup_front_hook(x, coords):
+        def _monitor_front_hook(x, coords):
             now = time.monotonic()
             elapsed = now - self._step_timer
             self._step_timer = now
@@ -147,23 +145,9 @@ class AtlasEngine(ModelEngine):
                 self._step_count, elapsed, mem_alloc, mem_reserved,
             )
 
-            # Cleanup to prevent fragmentation
-            gc.collect()
-            torch.cuda.empty_cache()
-
-            mem_after = torch.cuda.memory_allocated() / (1024**3)
-            reserved_after = torch.cuda.memory_reserved() / (1024**3)
-            freed = mem_alloc - mem_after
-
-            if freed > 0.01:  # Only log if meaningful cleanup occurred
-                logger.info(
-                    "  Cleanup freed %.2f GB (now %.2f GB alloc, %.2f GB reserved)",
-                    freed, mem_after, reserved_after,
-                )
-
             return _orig_front_hook(x, coords)
 
-        self._model.front_hook = _cleanup_front_hook
+        self._model.front_hook = _monitor_front_hook
 
     def predict(
         self,

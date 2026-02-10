@@ -21,8 +21,9 @@
 #   2. bf16 autocast on model + autoencoder (4.4x cumulative)
 #   3. EM sampler: 1 model eval/step vs rk_roberts' 2 (7.3x cumulative)
 #   torch.compile was removed — it caused progressive slowdown over 60 steps
-#   (dynamo cache accumulation: 52s→89s/step). gc+empty_cache hook added instead.
+#   (dynamo cache accumulation: 52s→89s/step).
 #   File-backed ZarrBackend on /dev/shm avoids 17 GB Python heap pressure.
+#   Note: empty_cache() between steps was tested but destroys CUDA allocator perf.
 #
 # References:
 #   - 11-runpod.md Section 6.1 (Docker Specification)
