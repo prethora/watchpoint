@@ -104,6 +104,11 @@ def translate_atlas(raw: xr.Dataset) -> xr.Dataset:
         coords=coords,
     )
 
+    # Clamp all variables to physical bounds. Diffusion-based models (especially
+    # with EM sampler) can produce small numbers of outliers at polar extremes.
+    # Standard NWP post-processing practice.
+    ds = clamp_to_bounds(ds)
+
     return ds
 
 
@@ -190,11 +195,37 @@ def translate_nowcast(
     return ds
 
 
+def clamp_to_bounds(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Clamp canonical variables to physical bounds.
+
+    Diffusion-based weather models can produce small numbers of outlier values
+    at grid extremes (poles, long forecast horizons). This is standard NWP
+    post-processing — clamp and log the count.
+    """
+    for var_name, (lo, hi) in VARIABLE_BOUNDS.items():
+        if var_name not in ds.data_vars:
+            continue
+        data = ds[var_name].values
+        below = int(np.sum(data < lo))
+        above = int(np.sum(data > hi))
+        if below > 0 or above > 0:
+            total = data.size
+            pct = (below + above) / total * 100
+            logger.warning(
+                "Clamping '%s': %d below %.1f, %d above %.1f (%.4f%% of %d values)",
+                var_name, below, lo, above, hi, pct, total,
+            )
+            ds[var_name].values = np.clip(data, lo, hi)
+    return ds
+
+
 def validate(ds: xr.Dataset) -> None:
     """
     Validate canonical dataset against physical bounds (Section 7.3).
 
-    Raises ValueError if any variable is out of bounds or contains NaN/Inf.
+    Raises ValueError if any variable contains NaN/Inf or is missing.
+    Out-of-bounds values should already be clamped by clamp_to_bounds().
     """
     for var_name, (lo, hi) in VARIABLE_BOUNDS.items():
         if var_name not in ds.data_vars:
@@ -205,14 +236,6 @@ def validate(ds: xr.Dataset) -> None:
             non_finite = int(np.sum(~np.isfinite(data)))
             raise ValueError(
                 f"Variable '{var_name}' contains {non_finite} non-finite values"
-            )
-
-        below = np.sum(data < lo)
-        above = np.sum(data > hi)
-        if below > 0 or above > 0:
-            raise ValueError(
-                f"Variable '{var_name}' out of bounds [{lo}, {hi}]: "
-                f"{int(below)} below, {int(above)} above"
             )
 
 

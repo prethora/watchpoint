@@ -92,17 +92,19 @@ class AtlasEngine(ModelEngine):
         """
         Apply GPU performance optimizations to the loaded Atlas model.
 
-        Three optimizations (torch.compile removed — it caused progressive slowdown
-        from dynamo cache accumulation over 60 steps, 52s→89s/step):
+        Two optimizations that don't affect numerical accuracy:
 
         1. TF32 matmul: PyTorch 2.5 defaults TF32 off. A100 FP32=19.5 TFLOPS vs TF32=156 TFLOPS.
         2. bf16 autocast: Wrap model + autoencoder forward in bfloat16 autocast.
-        3. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2.
+
+        EM sampler was removed — it uses 1 model eval/step instead of rk_roberts' 2,
+        which caused compounding truncation errors over 60 autoregressive steps
+        (9100+ out-of-bounds temperature values at polar extremes).
 
         Modes:
-          "all"         — TF32 + bf16 autocast + EM sampler
+          "all"         — TF32 + bf16 autocast (default)
           "all_compile" — all + torch.compile DiT blocks (with periodic dynamo reset)
-          "tf32"        — TF32 only (test if bf16/EM are hurting)
+          "tf32"        — TF32 only
 
         Note: torch.cuda.empty_cache() was tested but destroys the CUDA caching
         allocator's memory pool, causing 2-5x slowdown per step.
@@ -135,12 +137,7 @@ class AtlasEngine(ModelEngine):
         self._model.autoencoders[0].forward = _bf16_ae_fwd
         logger.info("bf16 autocast enabled for model + autoencoder")
 
-        # 3. Switch to EM sampler (1 model eval/step instead of 2)
-        self._model.sinterpolant.sample_step = self._model.sinterpolant.em_step
-        self._model.sinterpolant_sample_steps = 100
-        logger.info("EM sampler enabled (100 sample steps)")
-
-        # 4. torch.compile DiT blocks (all_compile mode only)
+        # 3. torch.compile DiT blocks (all_compile mode only)
         if mode == "all_compile":
             self._apply_torch_compile()
 
