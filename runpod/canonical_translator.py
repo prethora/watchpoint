@@ -56,6 +56,11 @@ def translate_atlas(raw: xr.Dataset) -> xr.Dataset:
     xr.Dataset
         Dataset with 5 canonical variables, all float32.
     """
+    # Earth2studio outputs dims (time=1, lead_time=N, lat, lon) where time is
+    # the batch/init dimension. Squeeze the batch dim and rename lead_time→time
+    # to get (time, lat, lon) for our canonical format.
+    raw = _normalize_e2s_dims(raw)
+
     # Temperature: Kelvin -> Celsius
     temperature_c = raw["t2m"].values - 273.15
 
@@ -214,6 +219,33 @@ def validate(ds: xr.Dataset) -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_e2s_dims(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Normalize earth2studio output dimensions to (time, lat, lon).
+
+    E2S deterministic() outputs with dims (time, lead_time, lat, lon) where
+    'time' is the batch/init dimension (size 1) and 'lead_time' holds the
+    actual forecast steps. Squeeze batch and rename lead_time→time.
+    """
+    sample_var = next(iter(ds.data_vars))
+    dims = ds[sample_var].dims
+    logger.info("Raw e2s dimensions: %s, shape: %s", dims, ds[sample_var].shape)
+
+    if "lead_time" in dims and "time" in dims:
+        # Squeeze the batch 'time' dimension (size 1) and rename lead_time
+        ds = ds.isel(time=0, drop=True)
+        ds = ds.rename({"lead_time": "time"})
+        logger.info("Normalized dims: squeezed batch, renamed lead_time→time")
+    elif "lead_time" in dims:
+        ds = ds.rename({"lead_time": "time"})
+        logger.info("Normalized dims: renamed lead_time→time")
+
+    sample_var_after = next(iter(ds.data_vars))
+    logger.info("After normalization: dims=%s, shape=%s",
+                ds[sample_var_after].dims, ds[sample_var_after].shape)
+    return ds
+
 
 def _specific_to_relative_humidity(
     q: np.ndarray,

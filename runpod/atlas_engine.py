@@ -314,13 +314,10 @@ class AtlasEngine(ModelEngine):
                 # Roll along the lon axis (last axis)
                 data_vars[var_name] = (ds[var_name].dims, data[..., sort_idx])
 
-            ds = xr.Dataset(
-                data_vars,
-                coords={
-                    "time": ds["time"],
-                    "lat": ds["lat"],
-                    "lon": ("lon", new_lon.astype(np.float32)),
-                },
-            )
+            # Preserve all original coordinates, only replacing lon
+            new_coords = {k: v for k, v in ds.coords.items() if k != "lon"}
+            new_coords["lon"] = ("lon", new_lon.astype(np.float32))
+
+            ds = xr.Dataset(data_vars, coords=new_coords)
 
         return ds
