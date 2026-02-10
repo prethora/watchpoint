@@ -84,8 +84,15 @@ RUN mv /usr/local/cuda /usr/local/_cuda_hidden && \
     "earth2grid @ git+https://github.com/NVlabs/earth2grid@11dcf1b0787a7eb6a8497a3a5a5e1fdcc31232d3" && \
     mv /usr/local/_cuda_hidden /usr/local/cuda
 
-# Step 3: Install remaining requirements (earth2studio pulls natten from PyPI).
-# NATTEN accounts for <2% of inference time — any working version is fine.
+# Step 3: Install NATTEN 0.17.5 from pre-built CUDA wheel (includes libnatten).
+# PyPI's natten wheel lacks libnatten, so no backend can be found for Atlas's
+# NeighborhoodAttention2D on A100 (head_dim=72, sm_80). The whl.natten.org wheel
+# has compiled CUDA kernels. NATTEN is <2% of inference time — not a bottleneck,
+# but libnatten must be present for it to work at all.
+RUN python3 -m pip install --no-cache-dir \
+    "natten==0.17.5+torch250cu124" -f https://whl.natten.org
+
+# Step 4: Install remaining requirements (torch + natten already satisfied).
 # Performance comes from TF32 + bf16 + EM sampler + torch.compile in atlas_engine.py.
 RUN python3 -m pip install --no-cache-dir \
     -r /tmp/requirements.txt \
