@@ -16,12 +16,13 @@
 #
 # Performance strategy (validated on A100 SXM 80GB):
 #   The main bottleneck is FP32 computation, NOT NATTEN (<2% of inference
-#   time). atlas_engine.py applies 4 runtime optimizations:
+#   time). atlas_engine.py applies 3 runtime optimizations:
 #   1. TF32 matmul (1.85x) — PyTorch 2.5 defaults this off
 #   2. bf16 autocast on model + autoencoder (4.4x cumulative)
 #   3. EM sampler: 1 model eval/step vs rk_roberts' 2 (7.3x cumulative)
-#   4. torch.compile DiT blocks (8.4x cumulative = 29.9s/step)
-#   NATTEN is pulled from PyPI by earth2studio — any working version is fine.
+#   torch.compile was removed — it caused progressive slowdown over 60 steps
+#   (dynamo cache accumulation: 52s→89s/step). gc+empty_cache hook added instead.
+#   File-backed ZarrBackend on /dev/shm avoids 17 GB Python heap pressure.
 #
 # References:
 #   - 11-runpod.md Section 6.1 (Docker Specification)

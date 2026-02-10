@@ -16,13 +16,14 @@ References:
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
+import time
 from typing import Any
 
 import numpy as np
 import torch
-import torch._dynamo
 import xarray as xr
 
 from mock_engine import ModelEngine
@@ -76,16 +77,16 @@ class AtlasEngine(ModelEngine):
         """
         Apply GPU performance optimizations to the loaded Atlas model.
 
-        Four optimizations validated on A100 SXM 80GB (see runpod_experiment_results/REPORT.md):
+        Three optimizations (torch.compile removed — it caused progressive slowdown
+        from dynamo cache accumulation over 60 steps, 52s→89s/step):
 
         1. TF32 matmul: PyTorch 2.5 defaults TF32 off. A100 FP32=19.5 TFLOPS vs TF32=156 TFLOPS.
-        2. torch.compile: Compile DiT blocks with default mode for kernel fusion (~8% speedup).
-        3. bf16 autocast: Wrap model + autoencoder forward in bfloat16 autocast. Atlas only
-           autocasts the SDPA call by default, leaving projections and MLPs in FP32.
-        4. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2, with
-           verified equivalent quality (avg RelRMSE 2.23%, all correlations > 0.999).
+        2. bf16 autocast: Wrap model + autoencoder forward in bfloat16 autocast.
+        3. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2.
 
-        Combined: 29.9s/step (8.4x over 250s baseline).
+        Plus a cleanup hook that runs gc.collect() + torch.cuda.empty_cache()
+        between steps to prevent CUDA memory fragmentation, with per-step
+        timing and memory logging.
         """
         # 1. Enable TF32 matmul precision (1.85x speedup)
         torch.set_float32_matmul_precision("high")
@@ -93,16 +94,7 @@ class AtlasEngine(ModelEngine):
         torch.backends.cudnn.allow_tf32 = True
         logger.info("TF32 matmul enabled")
 
-        # 2. torch.compile DiT blocks (~8% additional speedup, ~57s warmup on first step)
-        torch._dynamo.config.suppress_errors = True
-        num_blocks = len(self._model.model.blocks)
-        for i in range(num_blocks):
-            self._model.model.blocks[i] = torch.compile(
-                self._model.model.blocks[i], mode="default", fullgraph=False
-            )
-        logger.info("torch.compile applied to %d DiT blocks", num_blocks)
-
-        # 3. bf16 autocast on model (SInterpolantLatentDiT) + autoencoder (NattenCombineDiT)
+        # 2. bf16 autocast on model (SInterpolantLatentDiT) + autoencoder (NattenCombineDiT)
         _orig_model_fwd = self._model.model.forward
 
         def _bf16_model_fwd(*args, **kwargs):
@@ -120,10 +112,58 @@ class AtlasEngine(ModelEngine):
         self._model.autoencoders[0].forward = _bf16_ae_fwd
         logger.info("bf16 autocast enabled for model + autoencoder")
 
-        # 4. Switch to EM sampler (1 model eval/step instead of 2)
+        # 3. Switch to EM sampler (1 model eval/step instead of 2)
         self._model.sinterpolant.sample_step = self._model.sinterpolant.em_step
         self._model.sinterpolant_sample_steps = 100
         logger.info("EM sampler enabled (100 sample steps)")
+
+        # 4. Install cleanup hook between forecast steps
+        self._install_step_cleanup_hook()
+        logger.info("Step cleanup hook installed (gc + empty_cache between steps)")
+
+    def _install_step_cleanup_hook(self) -> None:
+        """
+        Install a front_hook on the Atlas model that runs between forecast steps.
+
+        Performs gc.collect() + torch.cuda.empty_cache() to prevent CUDA memory
+        fragmentation, and logs per-step timing and GPU memory stats.
+        """
+        self._step_timer = time.monotonic()
+        self._step_count = 0
+
+        _orig_front_hook = self._model.front_hook
+
+        def _cleanup_front_hook(x, coords):
+            now = time.monotonic()
+            elapsed = now - self._step_timer
+            self._step_timer = now
+            self._step_count += 1
+
+            mem_alloc = torch.cuda.memory_allocated() / (1024**3)
+            mem_reserved = torch.cuda.memory_reserved() / (1024**3)
+
+            logger.info(
+                "Step %d | %.1fs | GPU: %.2f GB alloc, %.2f GB reserved",
+                self._step_count, elapsed, mem_alloc, mem_reserved,
+            )
+
+            # Cleanup to prevent fragmentation
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            mem_after = torch.cuda.memory_allocated() / (1024**3)
+            reserved_after = torch.cuda.memory_reserved() / (1024**3)
+            freed = mem_alloc - mem_after
+
+            if freed > 0.01:  # Only log if meaningful cleanup occurred
+                logger.info(
+                    "  Cleanup freed %.2f GB (now %.2f GB alloc, %.2f GB reserved)",
+                    freed, mem_after, reserved_after,
+                )
+
+            return _orig_front_hook(x, coords)
+
+        self._model.front_hook = _cleanup_front_hook
 
     def predict(
         self,
@@ -152,14 +192,23 @@ class AtlasEngine(ModelEngine):
         if self._model is None:
             raise RuntimeError("Model not loaded. Call load_weights() first.")
 
+        import shutil
+
         import earth2studio.run as run
         from earth2studio.data import GFS
         from earth2studio.io import ZarrBackend
 
         logger.info("Starting Atlas inference for run_timestamp=%s", run_timestamp)
 
-        # E2S deterministic workflow: fetch data + run inference + write output
-        io = ZarrBackend()
+        # Use file-backed ZarrBackend on tmpfs to avoid ~17.4 GB Python heap pressure.
+        # /dev/shm is RAM-backed (tmpfs) so I/O is fast, but data lives outside Python's
+        # GC-scanned heap, reducing GC pause overhead over 60 steps.
+        zarr_tmp = "/dev/shm/atlas_output.zarr"
+        if os.path.exists(zarr_tmp):
+            shutil.rmtree(zarr_tmp)
+        logger.info("Using file-backed ZarrBackend at %s", zarr_tmp)
+
+        io = ZarrBackend(file_name=zarr_tmp)
         io = run.deterministic(
             time=[run_timestamp],
             nsteps=ATLAS_NSTEPS,
@@ -168,8 +217,8 @@ class AtlasEngine(ModelEngine):
             io=io,
         )
 
-        # Extract as xarray Dataset from the in-memory Zarr store
-        raw_ds = xr.open_zarr(io.root.store)
+        # Extract as xarray Dataset from the file-backed Zarr store
+        raw_ds = xr.open_zarr(zarr_tmp)
         logger.info("Raw Atlas output shape: %s", dict(raw_ds.sizes))
 
         # Handle longitude convention: E2S Atlas uses 0-360, we use -180 to 180
@@ -180,6 +229,11 @@ class AtlasEngine(ModelEngine):
 
         # Validate physical bounds
         validate(canonical_ds)
+
+        # Clean up temp zarr store
+        if os.path.exists(zarr_tmp):
+            shutil.rmtree(zarr_tmp)
+            logger.info("Cleaned up temp Zarr at %s", zarr_tmp)
 
         logger.info("Atlas inference complete: %s", dict(canonical_ds.sizes))
         return canonical_ds
