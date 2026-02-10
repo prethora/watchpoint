@@ -21,6 +21,8 @@ import os
 from typing import Any
 
 import numpy as np
+import torch
+import torch._dynamo
 import xarray as xr
 
 from mock_engine import ModelEngine
@@ -67,6 +69,61 @@ class AtlasEngine(ModelEngine):
         package = Atlas.load_default_package()
         self._model = Atlas.load_model(package)
         logger.info("Atlas model loaded successfully")
+
+        self._apply_optimizations()
+
+    def _apply_optimizations(self) -> None:
+        """
+        Apply GPU performance optimizations to the loaded Atlas model.
+
+        Four optimizations validated on A100 SXM 80GB (see runpod_experiment_results/REPORT.md):
+
+        1. TF32 matmul: PyTorch 2.5 defaults TF32 off. A100 FP32=19.5 TFLOPS vs TF32=156 TFLOPS.
+        2. torch.compile: Compile DiT blocks with default mode for kernel fusion (~8% speedup).
+        3. bf16 autocast: Wrap model + autoencoder forward in bfloat16 autocast. Atlas only
+           autocasts the SDPA call by default, leaving projections and MLPs in FP32.
+        4. EM sampler: Euler-Maruyama uses 1 model eval/step vs rk_roberts' 2, with
+           verified equivalent quality (avg RelRMSE 2.23%, all correlations > 0.999).
+
+        Combined: 29.9s/step (8.4x over 250s baseline).
+        """
+        # 1. Enable TF32 matmul precision (1.85x speedup)
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        logger.info("TF32 matmul enabled")
+
+        # 2. torch.compile DiT blocks (~8% additional speedup, ~57s warmup on first step)
+        torch._dynamo.config.suppress_errors = True
+        num_blocks = len(self._model.model.blocks)
+        for i in range(num_blocks):
+            self._model.model.blocks[i] = torch.compile(
+                self._model.model.blocks[i], mode="default", fullgraph=False
+            )
+        logger.info("torch.compile applied to %d DiT blocks", num_blocks)
+
+        # 3. bf16 autocast on model (SInterpolantLatentDiT) + autoencoder (NattenCombineDiT)
+        _orig_model_fwd = self._model.model.forward
+
+        def _bf16_model_fwd(*args, **kwargs):
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                return _orig_model_fwd(*args, **kwargs)
+
+        self._model.model.forward = _bf16_model_fwd
+
+        _orig_ae_fwd = self._model.autoencoders[0].forward
+
+        def _bf16_ae_fwd(*args, **kwargs):
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
+                return _orig_ae_fwd(*args, **kwargs)
+
+        self._model.autoencoders[0].forward = _bf16_ae_fwd
+        logger.info("bf16 autocast enabled for model + autoencoder")
+
+        # 4. Switch to EM sampler (1 model eval/step instead of 2)
+        self._model.sinterpolant.sample_step = self._model.sinterpolant.em_step
+        self._model.sinterpolant_sample_steps = 100
+        logger.info("EM sampler enabled (100 sample steps)")
 
     def predict(
         self,

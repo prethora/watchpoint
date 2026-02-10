@@ -14,23 +14,26 @@
 # Earth-2 Studio on first inference and cached at EARTH2STUDIO_CACHE on the
 # persistent RunPod Network Volume.
 #
-# NATTEN strategy: Pre-built CUDA wheels from whl.natten.org for
-# natten 0.17.5 + torch 2.5 + CUDA 12.4. These wheels include compiled
-# libnatten with CUDA kernels (FNA + unfused NA), avoiding the "could not
-# find a suitable backend" error that occurs with PyPI's CPU-only wheel.
-# No source compilation required — fast build times.
+# Performance strategy (validated on A100 SXM 80GB):
+#   The main bottleneck is FP32 computation, NOT NATTEN (<2% of inference
+#   time). atlas_engine.py applies 4 runtime optimizations:
+#   1. TF32 matmul (1.85x) — PyTorch 2.5 defaults this off
+#   2. bf16 autocast on model + autoencoder (4.4x cumulative)
+#   3. EM sampler: 1 model eval/step vs rk_roberts' 2 (7.3x cumulative)
+#   4. torch.compile DiT blocks (8.4x cumulative = 29.9s/step)
+#   NATTEN is pulled from PyPI by earth2studio — any working version is fine.
 #
 # References:
 #   - 11-runpod.md Section 6.1 (Docker Specification)
 #   - 11-runpod.md Section 6.2 (Model Weights Storage)
 #   - 11-runpod.md Section 4.1 (Class Structure)
+#   - runpod_experiment_results/REPORT.md (A100 investigation findings)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
 # Base: NVIDIA CUDA 12.4 Runtime with cuDNN
 # ---------------------------------------------------------------------------
-# Using runtime (not devel) since we install NATTEN from pre-built CUDA wheels
-# instead of compiling from source. Smaller image, faster builds.
+# Runtime image is sufficient — no CUDA compilation at build time.
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 # ---------------------------------------------------------------------------
@@ -73,7 +76,6 @@ COPY runpod/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools
 
 # Step 1: Install PyTorch 2.5 with CUDA 12.4 support.
-# Matches the NATTEN 0.17.5 pre-built wheel (torch250cu124).
 RUN python3 -m pip install --no-cache-dir "torch>=2.5.0,<2.6.0"
 
 # Step 2: Install earth2grid (hide CUDA to skip unnecessary C++ extensions).
@@ -82,15 +84,9 @@ RUN mv /usr/local/cuda /usr/local/_cuda_hidden && \
     "earth2grid @ git+https://github.com/NVlabs/earth2grid@11dcf1b0787a7eb6a8497a3a5a5e1fdcc31232d3" && \
     mv /usr/local/_cuda_hidden /usr/local/cuda
 
-# Step 3: Install NATTEN 0.17.5 from pre-built CUDA wheel (includes libnatten).
-# The whl.natten.org wheel includes compiled CUDA kernels for FNA + unfused NA.
-# PyPI's CPU-only wheel lacks libnatten, causing "could not find suitable backend"
-# errors at runtime. This wheel fixes that while keeping fast build times.
-# See: https://github.com/SHI-Labs/NATTEN/blob/main/docs/install.md
-RUN python3 -m pip install --no-cache-dir \
-    "natten==0.17.5+torch250cu124" -f https://whl.natten.org
-
-# Step 4: Install remaining requirements (torch + earth2grid + natten satisfied).
+# Step 3: Install remaining requirements (earth2studio pulls natten from PyPI).
+# NATTEN accounts for <2% of inference time — any working version is fine.
+# Performance comes from TF32 + bf16 + EM sampler + torch.compile in atlas_engine.py.
 RUN python3 -m pip install --no-cache-dir \
     -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
