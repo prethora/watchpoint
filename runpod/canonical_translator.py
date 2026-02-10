@@ -43,12 +43,12 @@ def translate_atlas(raw: xr.Dataset) -> xr.Dataset:
     """
     Translate Atlas (medium-range) raw output to canonical variables.
 
-    Expected raw variables (E2S Atlas / ERA5 convention):
+    Expected raw variables (E2S Atlas output, 76 variables total):
       - t2m: 2-meter temperature (K)
       - u10m: 10-meter U-wind component (m/s)
       - v10m: 10-meter V-wind component (m/s)
       - tp: total precipitation (m)
-      - q: specific humidity (kg/kg)
+      - q1000: specific humidity at 1000 hPa (kg/kg) — near-surface level
       - sp: surface pressure (Pa)
 
     Returns
@@ -68,8 +68,10 @@ def translate_atlas(raw: xr.Dataset) -> xr.Dataset:
     precipitation_mm = raw["tp"].values * 1000.0
 
     # Humidity: specific humidity -> relative humidity via Tetens formula
+    # Atlas outputs q at pressure levels (q50..q1000), not bare q.
+    # Use q1000 (1000 hPa, near surface) for consistency with t2m and sp.
     humidity_percent = _specific_to_relative_humidity(
-        q=raw["q"].values,
+        q=raw["q1000"].values,
         t2m=raw["t2m"].values,
         sp=raw["sp"].values,
     )

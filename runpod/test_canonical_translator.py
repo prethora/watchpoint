@@ -42,7 +42,7 @@ def _make_atlas_raw(
             "u10m": (["time", "lat", "lon"], np.full(shape, u10m, dtype=np.float32)),
             "v10m": (["time", "lat", "lon"], np.full(shape, v10m, dtype=np.float32)),
             "tp": (["time", "lat", "lon"], np.full(shape, tp_m, dtype=np.float32)),
-            "q": (["time", "lat", "lon"], np.full(shape, q, dtype=np.float32)),
+            "q1000": (["time", "lat", "lon"], np.full(shape, q, dtype=np.float32)),
             "sp": (["time", "lat", "lon"], np.full(shape, sp, dtype=np.float32)),
         },
         coords={
